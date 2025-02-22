@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import pandas as pd
 import plotly.express as px
 import plotly.io as pio
@@ -15,16 +16,18 @@ class ElectrodeArray:
     # Rows represent superiot to inferior.
     # Columns represent anterior to posterior.
     #
-    def __init__(self, description, session_id, block_id, trial_id, xt,
-                 start_chan, end_chan, num_rows=16, num_cols=8):
-        self.session_id = session_id  # Typically a date or file name.
-        self.desc = description # convention: use raw data variable name
+    def __init__(self, description = '', session_id = '', max_block_id = 0, block_id = 0, trial_id = 0, xt = None,
+                 start_chan = 0, end_chan = 0, num_rows=16, num_cols=8):
+        self.session_id = session_id.replace('.', '_')
+        
         self.block_id = block_id
-        self.trial_id = trial_id
-        self.idkey = f'{session_id}_{block_id}_{trial_id}'
-        self.num_samples = xt.shape[0]
-        self.num_rows = num_rows
+        self.desc = description # convention: use raw data variable name
+        self.idkey = f'{self.session_id}_{block_id}_{trial_id}_{description}' # unique identifier
+        self.max_block_id = max_block_id
         self.num_cols = num_cols
+        self.num_rows = num_rows
+        self.num_samples = xt.shape[0] if xt is not None else 0
+        self.trial_id = trial_id
         self.xt = self.extract_area6v(xt, start_chan, end_chan)
 
     def extract_area6v(self, xt, start_chan, end_chan):
@@ -49,9 +52,12 @@ class ElectrodeArray:
                                     115, 116, 106, 97, 21, 20, 7, 2,
                                     113, 114, 105, 98, 17, 24, 14, 0,
                                     127, 111, 104, 96, 30, 22, 16, 1]
-        extracted_xt = np.zeros((self.num_samples, len(chan_to_electrode_map)))
-        for iel in range(len(chan_to_electrode_map)):
-            extracted_xt[:, iel] = xt[:, chan_to_electrode_map[iel]]
+        if xt is not None:
+            extracted_xt = np.zeros((self.num_samples, len(chan_to_electrode_map)))
+            for iel in range(len(chan_to_electrode_map)):
+                extracted_xt[:, iel] = xt[:, chan_to_electrode_map[iel]]
+        else:
+            extracted_xt = None
             
         return extracted_xt
     
@@ -82,7 +88,7 @@ class ElectrodeArray:
                                     color=self.desc))
         
         fig.update_layout(
-            title=f'{self.desc} Array: {self.idkey}',
+            title=f'Array: {self.idkey}',
             xaxis_title="X-axis",
             yaxis_title="Y-axis"
         )
@@ -94,15 +100,15 @@ class ElectrodeArray:
         
         return fig
             
-            #
-            # Using plotly express, plot a specified set of electrode array
-            # x,y positions as time series using stack and facet features to
-            # create one plot per electrode.
-            # For each time point, the sptiaal data stored at each as 1D array.
-            # Indicate starting and ending spatial points as linear indices.
-            # Then reshape the data to 2D.
-            # start_row and end_row - use Python indexing convention.
-            #
+        #
+        # Using plotly express, plot a specified set of electrode array
+        # x,y positions as time series using stack and facet features to
+        # create one plot per electrode.
+        # For each time point, the sptiaal data stored at each as 1D array.
+        # Indicate starting and ending spatial points as linear indices.
+        # Then reshape the data to 2D.
+        # start_row and end_row - use Python indexing convention.
+        #
     def tsplot(self, start_row, end_row, interval=100, addl_text=''):
         pio.renderers.default = "browser"
     
@@ -123,7 +129,7 @@ class ElectrodeArray:
     
         fig = px.line(df, x='time', y='val', facet_col='el',
                       facet_col_wrap=self.num_cols,
-                      title=f'{self.desc} {addl_text} Time Series:\n {self.idkey}')
+                      title=f'Time Series: {self.idkey}\n{addl_text}')
         fig.update_layout(xaxis_title="Time", yaxis_title=self.desc)
     
         # Safe Animation Duration Update
@@ -132,3 +138,38 @@ class ElectrodeArray:
                 "duration"] = interval
     
         return fig
+
+    def save(self, out_dir):
+            # Create a file name and write a csv file.
+        fname = os.path.join(out_dir + os.sep + self.idkey + '.csv')
+        try:
+            with open(fname, 'w') as f:
+                f.write(f"{self.block_id}\n")
+                f.write(f"{self.desc}\n")
+                f.write(f"{self.idkey}\n")
+                f.write(f"{self.max_block_id}\n")
+                f.write(f"{self.num_cols}\n")
+                f.write(f"{self.num_rows}\n")
+                f.write(f"{self.num_samples}\n")
+                f.write(f"{self.session_id}\n")
+                f.write(f"{self.trial_id}\n")
+                np.savetxt(f, self.xt, fmt='%.8f', delimiter=',')
+        except Exception as e:
+            print(f"Error saving data to {fname}: {e}")
+    
+    def load(self, fname):
+            # Read a (completed) file name and load a csv file for ecog.
+        try:
+            with open(fname, 'r') as f:
+                self.block_id = f.readline().strip()
+                self.desc = f.readline().strip()
+                self.idkey = f.readline().strip()
+                self.max_block_id = int(f.readline().strip())
+                self.num_cols = int(f.readline().strip())
+                self.num_rows = int(f.readline().strip())
+                self.num_samples = int(f.readline().strip())
+                self.session_id = f.readline().strip()
+                self.trial_id = int(f.readline().strip())
+                self.xt = np.loadtxt(f, delimiter=',')
+        except Exception as e:
+            print(f"Error loading data from {fname}: {e}")

@@ -2,14 +2,11 @@
 import ipympl
 import itertools
 import math
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 import numpy as np
 import os
 import pandas as pd
 import random
-import scipy
-from scipy.stats import multivariate_normal
+import scipy.io
 import time
 
 from SpeechBCI import ElectrodeArray
@@ -23,9 +20,9 @@ try:
     for key in mat_data:
         print(key, len(mat_data[key]), type(mat_data[key]))
 
-    print(mat_data['spikePow'].shape)
+    print('spikePow:', mat_data['spikePow'].shape)
     for icol in range(mat_data['spikePow'].shape[1]):
-        print(mat_data['spikePow'][0,icol].shape)
+        print(mat_data['spikePow'][0,icol].shape, mat_data['tx1'][0,icol].shape, ''.join(mat_data['sentenceText'][icol]), mat_data['blockIdx'][icol])
 except FileNotFoundError:
     print(f"Error: The file '{mat_file_path}' was not found.")
 except Exception as e:
@@ -40,7 +37,7 @@ trial_id = 0
 start_chan = 0
 end_chan = 128
 
-if 1:
+if 0:
     desc = 'spikePow'
     spkpow = ElectrodeArray(desc, session_id, block_id, trial_id, mat_data[desc][0,trial_id], start_chan, end_chan)
     
@@ -58,7 +55,7 @@ if 1:
     fig.write_html(f'./figs/competitionData/train/{spkpow.idkey}_{addl_text}_tsplot.html', auto_open=False)
     fig.show()
 
-if 1:
+if 0:
     desc = 'tx1'
     tx1 = ElectrodeArray(desc, session_id, block_id, trial_id, mat_data[desc][0,trial_id], start_chan, end_chan)
     
