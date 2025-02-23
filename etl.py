@@ -20,9 +20,11 @@ def etl(session_id, mat_data, etl_data_dir, show_plots=False):
         # Detailed structure of mat_data is desribed elsewhere:
         # See: https://datadryad.org/stash/dataset/doi:10.5061/dryad.x69p8czpq
         # Consequently, we can hard-wire a couple of things.
+        # 
+        # The raw data combines measurement data from electrods placed at four disctinct
+        # locations.  We will create labelled subsets accoringly.  Such subsets will
+        # be defined by the start_chan and end_chan and a label.
         #
-    start_chan = 0
-    end_chan = 128
     
         # The number of sentences tells the number of trials.
     num_trials = len(mat_data['sentenceText'])
@@ -32,6 +34,9 @@ def etl(session_id, mat_data, etl_data_dir, show_plots=False):
 
         # Iterate over the trials.
         # Every trial will have same session_id.
+        # Every trial will generate two objects: Sentence and ElectrodeArray.
+        # The ElectrodeArray objects will be created for spikePow and tx1.
+        # Further, we will create a "superior" and "inferior" 6v subset for each ElectrodeArray.
     for trial_id in range(num_trials):
         block_id = int(mat_data['blockIdx'][trial_id][0])
 
@@ -44,22 +49,25 @@ def etl(session_id, mat_data, etl_data_dir, show_plots=False):
             # Process the electrode arrays.
             # Hard-wired knowledge is indicated by the default values.
         for desc in ['spikePow', 'tx1']:
-            x = ElectrodeArray(desc, session_id, num_blocks, block_id, trial_id,
-                               mat_data[desc][0,trial_id], start_chan, end_chan)
+                # Generate the data for area 6v Inferior.
+                # Per Willett, et al. (2023). 6v Inf had better speech decoding performance.
+                # We can revisit and reconfirm in a follow-up study.
+            var_name = "6v_Inf_" + desc
+            start_chan = 64
+            end_chan = 128
+            num_rows = 8
+            num_cols = 8
+            x = ElectrodeArray(var_name, session_id, num_blocks, block_id, trial_id,
+                               mat_data[desc][0,trial_id], start_chan, end_chan, num_rows, num_cols)
             x.save(etl_data_dir)
             
             if show_plots:
                 fig = x.implot(0, x.num_samples, 1)
                 fig.write_html(f'{etl_data_dir}/{x.idkey}_implot.html', auto_open=False)
                 
-                addl_text='Superior'
-                fig = x.tsplot(0, 8, addl_text=addl_text)
-                fig.write_html(f'{etl_data_dir}/{x.idkey}_{addl_text}_tsplot.html', auto_open=False)
+                fig = x.tsplot(0, 8)
+                fig.write_html(f'{etl_data_dir}/{x.idkey}_tsplot.html', auto_open=False)
                 
-                addl_text='Ventral'
-                fig = x.tsplot(8, 16, addl_text=addl_text)
-                fig.write_html(f'{etl_data_dir}/{x.idkey}_{addl_text}_tsplot.html', auto_open=False)
-
     return num_blocks, num_trials, num_time_samples
 
 #
@@ -85,7 +93,7 @@ def main():
     etl_data_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     
         #
-        # Get the .mat files.
+        # Get the list of .mat file names.
         # This is the Competition Data from Willett, et al. (2023).
         #
     mat_files = []

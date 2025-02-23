@@ -53,9 +53,10 @@ class ElectrodeArray:
                                     113, 114, 105, 98, 17, 24, 14, 0,
                                     127, 111, 104, 96, 30, 22, 16, 1]
         if xt is not None:
-            extracted_xt = np.zeros((self.num_samples, len(chan_to_electrode_map)))
-            for iel in range(len(chan_to_electrode_map)):
-                extracted_xt[:, iel] = xt[:, chan_to_electrode_map[iel]]
+            k = end_chan - start_chan
+            extracted_xt = np.zeros((self.num_samples, k))
+            for iel in range(k):
+                extracted_xt[:, iel] = xt[:, chan_to_electrode_map[start_chan + iel]]
         else:
             extracted_xt = None
             
@@ -109,7 +110,7 @@ class ElectrodeArray:
         # Then reshape the data to 2D.
         # start_row and end_row - use Python indexing convention.
         #
-    def tsplot(self, start_row, end_row, interval=100, addl_text=''):
+    def tsplot(self, start_row, end_row, interval=100):
         pio.renderers.default = "browser"
     
         # Data Integrity Check
@@ -129,7 +130,7 @@ class ElectrodeArray:
     
         fig = px.line(df, x='time', y='val', facet_col='el',
                       facet_col_wrap=self.num_cols,
-                      title=f'Time Series: {self.idkey}\n{addl_text}')
+                      title=f'Time Series: {self.idkey}')
         fig.update_layout(xaxis_title="Time", yaxis_title=self.desc)
     
         # Safe Animation Duration Update
