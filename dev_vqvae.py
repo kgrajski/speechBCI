@@ -62,18 +62,18 @@ def main():
     val_prop = 0.2
     test_prop = 0.2
     train_prop = 1 - val_prop - test_prop
-    batch_size = 60
+    batch_size = 64
 
         #
         # Directory containing the ETL data.
         #
-    etl_data_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
+    etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     
         #
         # Make a study dataset
         #   Note: Choice of loss function could require one-hot encoding of the label vector.
         #
-    study_dataset = SpeechBCIDataSet_2D(etl_data_dir)
+    study_dataset = SpeechBCIDataSet_2D(etl_dir)
 
         #
         # Make the train, validation, and test splits

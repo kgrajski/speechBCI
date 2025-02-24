@@ -45,30 +45,38 @@ class SpeechBCIDataSet_2D(Dataset):
         var_names = []
         for basefile in basefile_names:
             parts = basefile.split('_')
-            idkeys.append('_'.join(parts[0:-1]))
-            var_names.append(parts[-1])
+            if not (parts[-1] == 'sentenceText'):
+                idkeys.append('_'.join(parts[0:-3]))
+                var_names.append('_'.join(parts[-3:]))
         idkeys = list(set(idkeys))
         var_names = set(var_names)
         print(f"Found {len(idkeys)} unique idkeys and {len(var_names)} unique variable names {var_names}.")
-        var_names.discard('sentenceText')
         var_names = list(var_names)
         
             # Assemble the TCHW array (for later conversion to tensors).
             # Note the objects being read are Tx1x(HxW) arrays after reshaping.
         samples = []
         for idkey in idkeys:
+                # Create a list of Ti x H x W arrays.
             working_array = []
             for var_name in var_names:
                 fname = os.path.join(etl_dir + os.sep + idkey + '_' + var_name + '.csv')
                 x = ElectrodeArray()
                 x.load(fname)
-                #print(f"Loaded {fname} with shape {x.xt.shape} reshaped to {x.xt.reshape(-1, x.num_rows, x.num_cols).shape}.")
+                #print(f"Loaded {fname} shape {x.xt.shape} reshaped {x.xt.reshape(-1, x.num_rows, x.num_cols).shape}.")
                 working_array.append(x.xt.reshape(-1, x.num_rows, x.num_cols))
+                
+                # Stack the arrays to create a Ti x C x H x W array.
             working_array = np.stack(working_array, axis=1)
             #print(f"working array shape = {working_array.shape}.")
+            
+                # Create a list of Tj x C x H x W arrays.
             samples.append(working_array)
             #print(f"samples shape {len(samples)}.")
             #print([s.shape for s in samples])
+            
+            # Stack the arrays to create the final T x C x H x W array,
+            # where T is the sum of the Ti's.
         samples = np.concatenate(samples, axis=0)
         print(f"Final working array shape = {samples.shape}.")
         

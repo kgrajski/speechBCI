@@ -154,7 +154,10 @@ class ElectrodeArray:
                 f.write(f"{self.num_samples}\n")
                 f.write(f"{self.session_id}\n")
                 f.write(f"{self.trial_id}\n")
-                np.savetxt(f, self.xt, fmt='%.8f', delimiter=',')
+                if self.xt is not None and self.xt.size > 0:
+                    np.savetxt(f, self.xt, fmt='%.8f', delimiter=',')
+                else:
+                    print(f"Warning: self.xt is empty for {self.idkey}, not saving data.")
         except Exception as e:
             print(f"Error saving data to {fname}: {e}")
     

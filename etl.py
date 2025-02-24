@@ -168,7 +168,7 @@ def main():
     
     for mat_file_path in mat_files:
         try:
-            print(f"Processing {mat_file_path}")
+            print(f"\nProcessing {mat_file_path}")
             mat_data = scipy.io.loadmat(mat_file_path)
             session_id = os.path.splitext(os.path.basename(mat_file_path))[0]
             num_blocks, num_trials, num_time_samples = etl_blockZ(session_id, mat_data, etl_dir, stats_dir, False)
