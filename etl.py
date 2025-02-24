@@ -49,11 +49,17 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
         # locations.  We will create labelled subsets accoringly.  Such subsets will
         # be defined by the start_chan and end_chan and a label.
         #
-    
+        
         # The number of sentences tells the number of trials.
     num_trials = len(mat_data['sentenceText'])
-    num_blocks = max([int(mat_data['blockIdx'][i][0]) for i in range(num_trials)])
     num_time_samples = sum([mat_data['spikePow'][0,icol].shape[0] for icol in range(num_trials)])
+    
+        # We'd like to know the highest block index in the session, because later
+        # those will be used as the source for test and/or validation data.
+        # Further note that in this dataset, the block_id is 1-based.
+    max_block_id = max([int(mat_data['blockIdx'][i][0]) for i in range(num_trials)])
+    num_blocks = len(set([int(mat_data['blockIdx'][i][0]) for i in range(num_trials)]))
+
     print(f"ETL on {session_id} with {num_trials} trials, {num_blocks} blocks, and {num_time_samples} time samples.")
 
         # Iterate over the trials.
@@ -70,7 +76,7 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
             # Process the sentence text.
         sentence_text = mat_data['sentenceText'][trial_id]
         num_samples_this_trial = mat_data['spikePow'][0,trial_id].shape[0]
-        x = Sentence('sentenceText', session_id, num_blocks, block_id, trial_id, num_samples_this_trial, sentence_text)
+        x = Sentence('sentenceText', session_id, max_block_id, block_id, trial_id, num_samples_this_trial, sentence_text)
         x.save(etl_dir)
         
             # Process the electrode arrays.
@@ -87,7 +93,7 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
             end_chan = 128
             num_rows = 8
             num_cols = 8
-            x = ElectrodeArray(var_name, session_id, num_blocks, block_id, trial_id,
+            x = ElectrodeArray(var_name, session_id, max_block_id, block_id, trial_id,
                                mat_data[var_name_raw][0,trial_id], start_chan, end_chan, num_rows, num_cols)
             x.save(etl_dir)
             roster.append([x.idkey, block_id, var_name])
@@ -104,7 +110,8 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
     #
     df = pd.DataFrame(roster, columns=['idkey', 'block_id', 'var_name'])
     zstats = []
-    for iblk in range(1, num_blocks+1):
+    blks = df['block_id'].unique()
+    for iblk in blks:
         for ivar in var_list_etl:
             df_block = df[(df['block_id'] == iblk) & (df['var_name'] == ivar)]
             global_mean, global_sd = block_zscore(list(df_block['idkey']), etl_dir)
@@ -116,61 +123,6 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
         zstats.to_csv(os.path.join(stats_dir, session_id + '_zstats.csv'),
                       index=False, float_format='%.4f', sep=',')
 
-    return num_blocks, num_trials, num_time_samples
-
-def etl_vanilla(session_id, mat_data, etl_dir, stats_dir='', show_plots=False):
-        #
-        # Detailed structure of mat_data is desribed elsewhere:
-        # See: https://datadryad.org/stash/dataset/doi:10.5061/dryad.x69p8czpq
-        # Consequently, we can hard-wire a couple of things.
-        # 
-        # The raw data combines measurement data from electrods placed at four disctinct
-        # locations.  We will create labelled subsets accoringly.  Such subsets will
-        # be defined by the start_chan and end_chan and a label.
-        #
-    
-        # The number of sentences tells the number of trials.
-    num_trials = len(mat_data['sentenceText'])
-    num_blocks = max([int(mat_data['blockIdx'][i][0]) for i in range(num_trials)])
-    num_time_samples = sum([mat_data['spikePow'][0,icol].shape[0] for icol in range(num_trials)])
-    print(f"ETL on {session_id} with {num_trials} trials, {num_blocks} blocks, and {num_time_samples} time samples.")
-
-        # Iterate over the trials.
-        # Every trial will have same session_id.
-        # Every trial will generate two objects: Sentence and ElectrodeArray.
-        # The ElectrodeArray objects will be created for spikePow and tx1.
-        # Further, we will create a "superior" and "inferior" 6v subset for each ElectrodeArray.
-    for trial_id in range(num_trials):
-        block_id = int(mat_data['blockIdx'][trial_id][0])
-
-            # Process the sentence text.
-        sentence_text = mat_data['sentenceText'][trial_id]
-        num_samples_this_trial = mat_data['spikePow'][0,trial_id].shape[0]
-        x = Sentence('sentenceText', session_id, num_blocks, block_id, trial_id, num_samples_this_trial, sentence_text)
-        x.save(etl_dir)
-        
-            # Process the electrode arrays.
-            # Hard-wired knowledge is indicated by the default values.
-        for desc in ['spikePow', 'tx1']:
-                # Generate the data for area 6v Inferior.
-                # Per Willett, et al. (2023). 6v Inf had better speech decoding performance.
-                # We can revisit and reconfirm in a follow-up study.
-            var_name = "6v_Inf_" + desc
-            start_chan = 64
-            end_chan = 128
-            num_rows = 8
-            num_cols = 8
-            x = ElectrodeArray(var_name, session_id, num_blocks, block_id, trial_id,
-                               mat_data[desc][0,trial_id], start_chan, end_chan, num_rows, num_cols)
-            x.save(etl_dir)
-            
-            if show_plots:
-                fig = x.implot(0, x.num_samples, 1)
-                fig.write_html(f'{stats_dir}/{x.idkey}_implot.html', auto_open=False)
-                
-                fig = x.tsplot(0, 8)
-                fig.write_html(f'{stats_dir}/{x.idkey}_tsplot.html', auto_open=False)
-                
     return num_blocks, num_trials, num_time_samples
 
 #
@@ -215,8 +167,8 @@ def main():
     tot_time_samples = 0
     
     for mat_file_path in mat_files:
-        print(f'Accessing Raw Data {mat_file_path}')
         try:
+            print(f"Processing {mat_file_path}")
             mat_data = scipy.io.loadmat(mat_file_path)
             session_id = os.path.splitext(os.path.basename(mat_file_path))[0]
             num_blocks, num_trials, num_time_samples = etl_blockZ(session_id, mat_data, etl_dir, stats_dir, False)
@@ -224,6 +176,7 @@ def main():
             tot_num_blocks += num_blocks
             tot_num_trials += num_trials
             tot_time_samples += num_time_samples
+            print(f"Completed {mat_file_path}")
 
         except FileNotFoundError:
             print(f"Error: The file '{mat_file_path}' was not found.")
