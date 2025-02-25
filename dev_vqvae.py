@@ -2,6 +2,7 @@
 import sys
 sys.path.append("./")
 
+from collections.abc import Iterable
 import numpy as np
 import os
 import time
@@ -12,6 +13,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
+import torchvision.utils as vutils
+
+from tqdm import tqdm
+
+from VQVAE import VQVAE
+import vutils
 
 #
 # Get the ECoGDataSet class defs.
@@ -22,20 +29,127 @@ from SpeechBCIDataSet_2D import SpeechBCIDataSet_2D
 # Local Code
 # Eventually move to a helper function file.
 #
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())
+
+def count_trainable_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=10):
+    
+            #
+            # Set up tensorboard
+            # Default log_dir argument is "runs" - but it's good to be specific
+            # torch.utils.tensorboard.SummaryWriter is imported above
+            #
+    writer = SummaryWriter(os.path.join('runs' + os.sep + exp_name))
+
+            #
+            # Print some information about the model
+            #
+    print("##### Start Exp =", exp_name)
+    print(model)
+    print(f"Total parameters: {count_parameters(model)}")
+    print(f"Trainable parameters: {count_trainable_parameters(model)}")
+    
+            #
+            # Train the model
+            #
+    for iter in range(num_epochs):
+        print(f"Epoch {iter+1}\n-------------------------------")
+        train(train_dl, model, optimizer, writer, device)
+        loss, _, _ = test(test_dl, model, writer, device)
+    
+            #
+            # Validate the model
+            #
+    print('Validation Set')
+    loss, _, _ = test(val_dl, model, writer, device)
+    print("##### Done Exp =", exp_name, "\n\n")
 
 #
-# Reminder: nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
+# Adapted from: https://github.com/Vrushank264/VQVAE-PyTorch/blob/main/train.py
 #
+def train(loader, model, opt, writer, device, beta = 1.0, steps = 0):
+    
+    loop = tqdm(loader, leave = True, position = 0)
+    model.train()
+    for imgs in loop:
+        
+        imgs = imgs.to(device)
+        opt.zero_grad()
+        z_e_x, z_q_x, x_tilde = model(imgs)
+        
+        recon_loss = fun.mse_loss(x_tilde, imgs)
+        vq_loss = fun.mse_loss(z_q_x, z_e_x.detach())
+        commitment_loss = fun.mse_loss(z_e_x, z_q_x.detach())
+        
+        loss = recon_loss + vq_loss + beta * commitment_loss
+        loss.backward()
+        
+        writer.add_scalar("loss/train/reconstruction", recon_loss.item(), steps)
+        writer.add_scalar("loss/train/quantization", vq_loss.item(), steps)
+        writer.add_scalar("loss/train/commitment", commitment_loss.item(), steps)
+        
+        opt.step()
+        steps += 1
+        
+def test(loader, model, writer, device, steps = 0):
+    
+    loop = tqdm(loader, leave = True, position = 0)
+    model.eval()
+    with torch.no_grad():
+        recon_loss, vq_loss, commitment_loss = 0.0, 0.0, 0.0
+        for imgs, _ in loop:
+            
+            imgs = imgs.to(device)
+            z_e_x, z_q_x, x_tilde = model(imgs)
+            recon_loss += fun.mse_loss(x_tilde, imgs)
+            vq_loss += fun.mse_loss(z_q_x, z_e_x)
+            commitment_loss += fun.mse_loss(z_e_x, z_q_x)
+        
+        recon_loss /= len(loader)
+        vq_loss /= len(loader)
+        commitment_loss /= len(loader)
+        
+    writer.add_scalar("loss/test/reconstruction", recon_loss.item(), steps)
+    writer.add_scalar("loss/test/quantization", vq_loss.item(), steps)
+    writer.add_scalar("loss/test/commitment", commitment_loss.item(), steps)
+    
+    return recon_loss.item(), vq_loss.item(), commitment_loss.item()
 
+def generate(model, imgs, device = torch.device('cuda')):
+    
+    model.eval()
+    with torch.no_grad():
+        
+        imgs = imgs.to(device)
+        _, _, x_tilde = model(imgs)
+    
+    return x_tilde
 #
-# Reminder: To view, start TensorBoard on the command line with:
-#   tensorboard --logdir=runs
-# ...and open a browser tab to http://localhost:6006/
-
-#
-# MAIN
+# Define main
 #
 def main():
+
+    #
+    # Reminder: nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
+    #
+
+    #
+    # Reminder: To view, start TensorBoard on the command line with:
+    #   tensorboard --logdir=runs
+    # ...and open a browser tab to http://localhost:6006/
+
+
+    #
+    # Reminder: nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
+    #
+
+    #
+    # Reminder: To view, start TensorBoard on the command line with:
+    #   tensorboard --logdir=runs
+    # ...and open a browser tab to http://localhost:6006/
 
         # Set script name for console log
     script_name = "dev_vqvae"
@@ -62,7 +176,7 @@ def main():
     val_prop = 0.2
     test_prop = 0.2
     train_prop = 1 - val_prop - test_prop
-    batch_size = 64
+    batch_size = 32
 
         #
         # Directory containing the ETL data.
@@ -70,88 +184,32 @@ def main():
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     
         #
-        # Make a study dataset
-        #   Note: Choice of loss function could require one-hot encoding of the label vector.
+        # Make a study dataset and then partition to train, val, and test.
         #
     study_dataset = SpeechBCIDataSet_2D(etl_dir)
-
-        #
-        # Make the train, validation, and test splits
-        #
-    #train_dataset, val_dataset, test_dataset = random_split(study_dataset, [train_prop, val_prop, test_prop])
-
-        #
-        # Setup DataLoaders
-        #
-    #train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    #val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    #test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_dataset, val_dataset, test_dataset = random_split(study_dataset, [train_prop, val_prop, test_prop])
+    train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
         #
-        # OPTIONAL: Quick sanity checks to make sure data read in correctlyl
+        #   Create the model and run one or more experiments.
         #
-    if 0:
-        
-        print("** SUMMARY **", study_dataset.samples.groupby(['label'])['label'].count())
-     
-        ecog_tensor, label_tensor = train_dataset.__getitem__(0)
-        print('Train ECoG shape', ecog_tensor.shape, label_tensor.shape)        
+    exp_name = "VQVAE_2D"
+    in_channels = 2 # Channels in the traditional sense of channels such as RGB in image. hard-coded for now.
+    out_channels =  8 # Dimensionality of the latent space.
+    learning_rate = 1e-3
 
-        print("TRAIN")
-        train_batch = next(iter(train_dl))
-        print('Batch shape',train_batch[0].shape)
-        
-        if 0:
-            for batch_idx, (batch_data, batch_labels) in enumerate(val_batch):
-                print(f"Batch index: {batch_idx}")
-                print("Batch data shape:", batch_data.shape)
-                print("Batch labels:", batch_labels)
-                print("Batch labels shape:", batch_labels.shape)
+    model = VQVAE(in_channels, out_channels).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
         #
-        #   Model Training
+        # Do the experiment.
+        # Normally prefer to have a function call here, but for now, just do it.
         #
+    run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device)
 
-            #
-            #   Select Loss Function and Optimizer
-            #
-    num_epochs = 10
-    lrn_rate = 0.001
-    lrn_momentum = 0.9
-    loss_fn = nn.CrossEntropyLoss()
-        
-            #
-            #   Set up the model and run the experiment
-            #
-
-                #
-                #   Dirt simple "flattened" model.
-                #
-    if 0:
-        exp_name = "NN_Flat"
-        input_dim = 32 * 64 * 32
-        hidden_dim = 8
-        output_dim = 6
-        num_layers = 3
-        model = NN_Flat(input_dim, hidden_dim, num_layers, output_dim).to(device)
-        optimizer = torch.optim.SGD(model.parameters(), lr=lrn_rate, momentum=lrn_momentum)
-        run_exp(exp_name, model, num_epochs, train_dl, test_dl, val_dl, loss_fn, optimizer, device)
-
-        
-                #
-                #   Very simple Conv3D model.
-                #
-    if 0:
-        exp_name = "NN_Conv3D_Simple"
-        in_depth = 32
-        in_rows = 64
-        in_cols = 32
-        fc_dim = 32
-        output_dim = 6
-        model = NN_Conv3D_Simple(in_depth, in_rows, in_cols, fc_dim, output_dim).to(device)
-        optimizer = torch.optim.SGD(model.parameters(), lr=lrn_rate, momentum=lrn_momentum)
-        run_exp(exp_name, model, num_epochs, train_dl, test_dl, val_dl, loss_fn, optimizer, device)
-
+        #
         #
         # Wrap-up
         #
@@ -159,7 +217,7 @@ def main():
     print("*** " + script_name + " - END ***")
             
 #
-# EXECUTE
+# Run main
 #
 if __name__ == '__main__':
     main()

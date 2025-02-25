@@ -78,15 +78,9 @@ class SpeechBCIDataSet_2D(Dataset):
             # Stack the arrays to create the final T x C x H x W array,
             # where T is the sum of the Ti's.
         samples = np.concatenate(samples, axis=0)
-        print(f"Final working array shape = {samples.shape}.")
-        
+ 
         return samples
     
     def __getitem__(self, idx):
-        file_path = self.samples.path[idx]
-        ecog_array = ECoGArrayRec()
-        ecog_array.load(file_path)
-        ecog_tensor = torch.tensor(ecog_array.ecog, dtype=torch.float32).unsqueeze(0) #unsqueeze to support batching later
-        label_tensor = torch.tensor(label, dtype=torch.int64)
-        return ecog_tensor, label_tensor
-
+        x = torch.tensor(self.samples[idx], dtype=torch.float32)
+        return x
