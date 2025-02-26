@@ -197,7 +197,7 @@ def main():
         #
     exp_name = "VQVAE_2D"
     in_channels = 2 # Channels in the traditional sense of channels such as RGB in image. hard-coded for now.
-    out_channels =  8 # Dimensionality of the latent space.
+    out_channels =  64 # Dimensionality of the latent space.
     learning_rate = 1e-3
 
     model = VQVAE(in_channels, out_channels).to(device)
