@@ -17,7 +17,7 @@ import torchvision.utils as vutils
 
 from tqdm import tqdm
 
-from VQVAE import VQVAE
+from Vqvae import VQVAE
 import vutils
 
 #
@@ -29,6 +29,16 @@ from SpeechBCIDataSet_2D import SpeechBCIDataSet_2D
 # Local Code
 # Eventually move to a helper function file.
 #
+
+#
+# Reminder: nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
+#
+
+#
+# Reminder: To view, start TensorBoard on the command line with:
+#   tensorboard --logdir=runs
+# ...and open a browser tab to http://localhost:6006/
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
 
@@ -44,89 +54,91 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
             #
     writer = SummaryWriter(os.path.join('runs' + os.sep + exp_name))
 
-            #
-            # Print some information about the model
-            #
+        #
+        # Print some information about the model
+        #
     print("##### Start Exp =", exp_name)
     print(model)
     print(f"Total parameters: {count_parameters(model)}")
     print(f"Trainable parameters: {count_trainable_parameters(model)}")
     
+        #
+        # Train the model
+        #
+    for iter in range(num_epochs):
+        
             #
             # Train the model
             #
-    for iter in range(num_epochs):
         print(f"Epoch {iter+1}\n-------------------------------")
-        train(train_dl, model, optimizer, writer, device)
-        loss, _, _ = test(test_dl, model, writer, device)
-    
+        data_recon, vq_loss, perplexity = train(train_dl, model, optimizer, device)
+        writer.add_scalar("loss/train/reconstruction", data_recon.item(), iter)
+        writer.add_scalar("loss/train/quantization", vq_loss.item(), iter)
+        writer.add_scalar("loss/train/perplexity", perplexity.item(), iter)
+        print(f"Train Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+        
             #
-            # Validate the model
-            #
-    print('Validation Set')
-    loss, _, _ = test(val_dl, model, writer, device)
-    print("##### Done Exp =", exp_name, "\n\n")
+            # Test the model
+            #     
+        data_recon, vq_loss, perplexity = test(test_dl, model, device)
+        writer.add_scalar("loss/test/reconstruction", data_recon.item(), iter)
+        writer.add_scalar("loss/test/quantization", vq_loss.item(), iter)
+        writer.add_scalar("loss/test/perplexity", perplexity.item(), iter)
+        print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+        
+        #
+        # Validate the model
+        #
+    data_recon, vq_loss, perplexity = test(val_dl, model, device)
+    writer.add_scalar("loss/val/reconstruction", data_recon.item(), iter)
+    writer.add_scalar("loss/val/quantization", vq_loss.item(), iter)
+    writer.add_scalar("loss/val/perplexity", perplexity.item(), iter)
 
-#
-# Adapted from: https://github.com/Vrushank264/VQVAE-PyTorch/blob/main/train.py
-#
-def train(loader, model, opt, writer, device, beta = 1.0, steps = 0):
+def train(loader, model, optimizer, device):
     
     loop = tqdm(loader, leave = True, position = 0)
+    data_recon_avg, vq_loss_avg, perplexity_avg = 0, 0, 0
     model.train()
-    for imgs in loop:
+    for data in loop:
+        data = data.to(device)
         
-        imgs = imgs.to(device)
-        opt.zero_grad()
-        z_e_x, z_q_x, x_tilde = model(imgs)
-        
-        recon_loss = fun.mse_loss(x_tilde, imgs)
-        vq_loss = fun.mse_loss(z_q_x, z_e_x.detach())
-        commitment_loss = fun.mse_loss(z_e_x, z_q_x.detach())
-        
-        loss = recon_loss + vq_loss + beta * commitment_loss
+        optimizer.zero_grad()
+        vq_loss, data_recon, perplexity = model(data)
+        recon_error = F.mse_loss(data_recon, data) / 255.0
+        loss = recon_error + vq_loss
         loss.backward()
+        optimizer.step()
         
-        writer.add_scalar("loss/train/reconstruction", recon_loss.item(), steps)
-        writer.add_scalar("loss/train/quantization", vq_loss.item(), steps)
-        writer.add_scalar("loss/train/commitment", commitment_loss.item(), steps)
+        data_recon_avg += recon_error
+        vq_loss_avg += vq_loss
+        perplexity_avg += perplexity
+    
+    data_recon_avg /= len(loader)
+    vq_loss_avg /= len(loader)
+    perplexity_avg /= len(loader)
+    
+    return data_recon_avg, vq_loss_avg, perplexity_avg
         
-        opt.step()
-        steps += 1
-        
-def test(loader, model, writer, device, steps = 0):
+def test(loader, model, device):
     
     loop = tqdm(loader, leave = True, position = 0)
+    data_recon_avg, vq_loss_avg, perplexity_avg = 0, 0, 0
     model.eval()
-    with torch.no_grad():
-        recon_loss, vq_loss, commitment_loss = 0.0, 0.0, 0.0
-        for imgs, _ in loop:
-            
-            imgs = imgs.to(device)
-            z_e_x, z_q_x, x_tilde = model(imgs)
-            recon_loss += fun.mse_loss(x_tilde, imgs)
-            vq_loss += fun.mse_loss(z_q_x, z_e_x)
-            commitment_loss += fun.mse_loss(z_e_x, z_q_x)
-        
-        recon_loss /= len(loader)
-        vq_loss /= len(loader)
-        commitment_loss /= len(loader)
-        
-    writer.add_scalar("loss/test/reconstruction", recon_loss.item(), steps)
-    writer.add_scalar("loss/test/quantization", vq_loss.item(), steps)
-    writer.add_scalar("loss/test/commitment", commitment_loss.item(), steps)
-    
-    return recon_loss.item(), vq_loss.item(), commitment_loss.item()
+    for data in loop:
+        data = data.to(device)
+        vq_loss, data_recon, perplexity = model(data)
+        recon_error = F.mse_loss(data_recon, data) / 255.0
 
-def generate(model, imgs, device = torch.device('cuda')):
-    
-    model.eval()
-    with torch.no_grad():
+        data_recon_avg += recon_error
+        vq_loss_avg += vq_loss
+        perplexity_avg += perplexity
         
-        imgs = imgs.to(device)
-        _, _, x_tilde = model(imgs)
-    
-    return x_tilde
+    data_recon_avg /= len(loader)
+    vq_loss_avg /= len(loader)
+    perplexity_avg /= len(loader)
+        
+    return data_recon_avg, vq_loss_avg, perplexity_avg
+
 #
 # Define main
 #
@@ -176,7 +188,7 @@ def main():
     val_prop = 0.2
     test_prop = 0.2
     train_prop = 1 - val_prop - test_prop
-    batch_size = 32
+    batch_size = 1024
 
         #
         # Directory containing the ETL data.
@@ -196,12 +208,19 @@ def main():
         #   Create the model and run one or more experiments.
         #
     exp_name = "VQVAE_2D"
-    in_channels = 2 # Channels in the traditional sense of channels such as RGB in image. hard-coded for now.
-    out_channels =  64 # Dimensionality of the latent space.
+    encoder_in_channels = 2
+    num_hiddens = 128
+    num_residual_hiddens = 32
+    num_residual_layers = 2
+    embedding_dim = 64
+    num_embeddings = 512
+    commitment_cost = 0.25
+    decay = 0.99
     learning_rate = 1e-3
 
-    model = VQVAE(in_channels, out_channels).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    model = VQVAE(encoder_in_channels, num_hiddens, num_residual_layers, num_residual_hiddens,
+                  num_embeddings, embedding_dim, commitment_cost, decay).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
     
         #
         # Do the experiment.
