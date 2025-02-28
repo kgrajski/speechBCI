@@ -131,11 +131,16 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         _, valid_quantize, _, _ = model._vq_vae(vq_output_eval)
         valid_reconstructions = model._decoder(valid_quantize)
         
-        img_grid = make_grid(valid_originals, nrow=16)
+        img_grid = make_grid(valid_originals, nrow=32)
         writer.add_image('Originals', img_grid)
         
-        img_grid = make_grid(valid_reconstructions, nrow=16)
+        img_grid = make_grid(valid_reconstructions, nrow=32)
         writer.add_image('Reconstructions', img_grid)
+        
+            #
+            # Visualize the model.
+            #
+        writer.add_graph(model, valid_originals)
 
         #
         # Close tensorboard
@@ -246,7 +251,7 @@ def main():
     val_prop = 0.2
     test_prop = 0.2
     train_prop = 1 - val_prop - test_prop
-    batch_size = 256
+    batch_size = 512
     
         #
         # Make a study dataset and then partition to train, val, and test.
@@ -261,10 +266,10 @@ def main():
         # Create the model and run one or more experiments.
         #
     exp_name = "VQVAE_2D"
-    num_epochs = 100
+    num_epochs = 500
     encoder_in_channels = 2
     num_hiddens = 128
-    num_residual_hiddens = 32
+    num_residual_hiddens = 64
     num_residual_layers = 2
     embedding_dim = 64
     num_embeddings = 256
