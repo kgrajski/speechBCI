@@ -1,3 +1,17 @@
+"""
+This module defines the Sentence class, which represents a sentence with associated metadata
+and provides methods to save and load the sentence data to and from a CSV file.
+
+Classes:
+    Sentence: A class to represent a sentence with metadata and methods to save and load data.
+
+Usage example:
+    sentence = Sentence(description="example", session_id="session1", max_block_id=10, block_id=1,
+                        trial_id=1, num_samples=100, sentence_text="This is a test sentence.")
+    sentence.save("/path/to/output")
+    sentence.load("/path/to/output/session1_1_1_example.csv")
+"""
+
 import os
 
 class Sentence:
@@ -31,7 +45,6 @@ class Sentence:
     def load(self, fname):
             # Read a (complete) file name and load a csv file.
         try:
-            
             with open(fname, 'r') as f:
                 self.block_id = f.readline().strip()
                 self.desc = f.readline().strip()

@@ -1,3 +1,17 @@
+"""
+This module performs ETL (Extract, Transform, Load) operations on Speech BCI data.
+It processes raw data files, extracts relevant information, applies transformations
+such as block-based Z-scoring, and saves the processed data for further analysis.
+
+Functions:
+    block_zscore(flist, etl_dir): Calculates global mean and std, then applies Z-scoring to the data.
+    etl_blockZ(session_id, mat_data, etl_dir, stats_dir='', show_plots=False): Performs ETL operations on a session.
+    main(): Main function to execute the ETL process on all identified .mat files.
+
+Usage example:
+    Run the script from the command line to process all .mat files in the specified directory:
+    $ python etl.py
+"""
 
 import itertools
 import numpy as np
@@ -7,21 +21,23 @@ import random
 import scipy.io
 import time
 
-#
-# Get the SpeechBCI class defs.
-#
 from SpeechBCI import ElectrodeArray
 from Sentence import Sentence
 
-#
-# Local Code
-#
 def block_zscore(flist, etl_dir):
+    """
+    Calculates global mean and std, then applies Z-scoring to the data.
 
-    # First pass: Calculate global mean and std
+    Args:
+        flist (list): List of file identifiers.
+        etl_dir (str): Directory containing the ETL files.
+
+    Returns:
+        tuple: Global mean and standard deviation.
+    """
     global_data = np.array([])
     for idkey in flist:
-        fname = os.path.join(etl_dir + os.sep + idkey + '.csv')
+        fname = os.path.join(etl_dir, idkey + '.csv')
         x = ElectrodeArray()
         x.load(fname)
         global_data = np.append(global_data, x.xt.flatten())
@@ -29,9 +45,8 @@ def block_zscore(flist, etl_dir):
     global_mean = np.mean(global_data)
     global_std = np.std(global_data)
     
-    # Second pass: Z-score the data using global mean and std
     for idkey in flist:
-        fname = os.path.join(etl_dir + os.sep + idkey + '.csv')
+        fname = os.path.join(etl_dir, idkey + '.csv')
         x = ElectrodeArray()
         x.load(fname)
         x.xt = (x.xt - global_mean) / global_std
@@ -39,54 +54,38 @@ def block_zscore(flist, etl_dir):
         
     return global_mean, global_std
     
-def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
-        #
-        # Detailed structure of mat_data is desribed elsewhere:
-        # See: https://datadryad.org/stash/dataset/doi:10.5061/dryad.x69p8czpq
-        # Consequently, we can hard-wire a couple of things.
-        # 
-        # The raw data combines measurement data from electrods placed at four disctinct
-        # locations.  We will create labelled subsets accoringly.  Such subsets will
-        # be defined by the start_chan and end_chan and a label.
-        #
-        
-        # The number of sentences tells the number of trials.
+def etl_blockZ(session_id, mat_data, etl_dir, stats_dir='', show_plots=False):
+    """
+    Performs ETL operations on a session.
+
+    Args:
+        session_id (str): Identifier for the session.
+        mat_data (dict): Data loaded from a .mat file.
+        etl_dir (str): Directory to save the ETL files.
+        stats_dir (str, optional): Directory to save the statistics files. Defaults to ''.
+        show_plots (bool, optional): Whether to generate and save plots. Defaults to False.
+
+    Returns:
+        tuple: Number of blocks, trials, and time samples.
+    """
     num_trials = len(mat_data['sentenceText'])
-    num_time_samples = sum([mat_data['spikePow'][0,icol].shape[0] for icol in range(num_trials)])
-    
-        # We'd like to know the highest block index in the session, because later
-        # those will be used as the source for test and/or validation data.
-        # Further note that in this dataset, the block_id is 1-based.
+    num_time_samples = sum([mat_data['spikePow'][0, icol].shape[0] for icol in range(num_trials)])
     max_block_id = max([int(mat_data['blockIdx'][i][0]) for i in range(num_trials)])
     num_blocks = len(set([int(mat_data['blockIdx'][i][0]) for i in range(num_trials)]))
 
     print(f"ETL on {session_id} with {num_trials} trials, {num_blocks} blocks, and {num_time_samples} time samples.")
 
-        # Iterate over the trials.
-        # Every trial will have same session_id.
-        # Every trial will generate two objects: Sentence and ElectrodeArray.
-        # The ElectrodeArray objects will be created for spikePow and tx1.
-        # Further, we will create a "superior" and "inferior" 6v subset for each ElectrodeArray.
-        
-        # To do the block-based Z-scoring, we need to know the number of samples in each trial.
     roster = []
     for trial_id in range(num_trials):
         block_id = int(mat_data['blockIdx'][trial_id][0])
-
-            # Process the sentence text.
         sentence_text = mat_data['sentenceText'][trial_id]
-        num_samples_this_trial = mat_data['spikePow'][0,trial_id].shape[0]
+        num_samples_this_trial = mat_data['spikePow'][0, trial_id].shape[0]
         x = Sentence('sentenceText', session_id, max_block_id, block_id, trial_id, num_samples_this_trial, sentence_text)
         x.save(etl_dir)
         
-            # Process the electrode arrays.
-            # Hard-wired knowledge is indicated by the default values.
         var_list_raw = ['spikePow', 'tx1']
         var_list_etl = []
         for var_name_raw in var_list_raw:
-                # Generate the data for area 6v Inferior.
-                # Per Willett, et al. (2023). 6v Inf had better speech decoding performance.
-                # We can revisit and reconfirm in a follow-up study.
             var_name = "6v_Inf_" + var_name_raw
             var_list_etl.append(var_name)
             start_chan = 64
@@ -94,7 +93,7 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
             num_rows = 8
             num_cols = 8
             x = ElectrodeArray(var_name, session_id, max_block_id, block_id, trial_id,
-                               mat_data[var_name_raw][0,trial_id], start_chan, end_chan, num_rows, num_cols)
+                               mat_data[var_name_raw][0, trial_id], start_chan, end_chan, num_rows, num_cols)
             x.save(etl_dir)
             roster.append([x.idkey, block_id, var_name])
             
@@ -105,9 +104,6 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
                 fig = x.tsplot(0, 8)
                 fig.write_html(f'{etl_dir}/{x.idkey}_tsplot.html', auto_open=False)
                 
-    #
-    # Do the block-based Z-scoring.
-    #
     df = pd.DataFrame(roster, columns=['idkey', 'block_id', 'var_name'])
     zstats = []
     blks = df['block_id'].unique()
@@ -125,42 +121,27 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir = '', show_plots=False):
 
     return num_blocks, num_trials, num_time_samples
 
-#
-# MAIN
-#
 def main():
-
-        # Set script name for console log
+    """
+    Main function to execute the ETL process on all identified .mat files.
+    """
     script_name = 'etl'
-    
-        # Start timer
     start_time = time.perf_counter()
     print('*** ' + script_name + ' - START ***')
 
-        # For reproducibility
-    np.random.seed(42)  # Set seed for reproducibility.
-    random.seed(42)  # Set seed for reproducibility.
+    np.random.seed(42)
+    random.seed(42)
     
-        #
-        # Directory info.
-        #
     raw_data_dir = "/home/ubuntu/speechBCI/data/competitionData/train"
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     stats_dir = "/home/ubuntu/speechBCI/data/competitionData/stats"
     
-        #
-        # Get the list of .mat file names.
-        # This is the Competition Data from Willett, et al. (2023).
-        #
     mat_files = []
     for root, _, files in os.walk(raw_data_dir):
         for file in files:
             if file.endswith(".mat"):
                 mat_files.append(os.path.join(root, file))
                 
-        #
-        # Perform ETL on each of the identified .mat files.
-        #
     tot_num_sessions = 0
     tot_num_blocks = 0
     tot_num_trials = 0
@@ -191,13 +172,9 @@ def main():
     print(f'Total number of trials: {tot_num_trials}')
     print(f'Total number of time samples: {tot_time_samples}')
   
-        # Wrap-up
     print(f'\nTotal elapsed time:  %.4f seconds' % (time.perf_counter() - start_time))
     print('*** ' + script_name + ' - END ***')
             
-#
-# EXECUTE
-#
 if __name__ == '__main__':
     main()
 
