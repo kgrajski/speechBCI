@@ -13,6 +13,7 @@ This animation is from a single trial during which the subject "spoke" a sentenc
 Each point in the grid corresponds to an electrode.  The data is shown as a heat map.
 
 This image is from the same animation as above, but shown as a time series.
+[Example Time Series](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
 
 ## Getting Started
 
