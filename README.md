@@ -8,7 +8,7 @@ The purpose of this repo is to explore an open-source data set comprised of elec
 ## Description
 
 The following set of slides describes this project.
-[Study Objectives](pdfs/Speech Decoding Pilot Study (Kamil Grajski 28Feb2025).pdf)
+[Speech Decoding Pilot Study (Kamil Grajski 28Feb2025).pdf](https://github.com/user-attachments/files/19057861/Speech.Decoding.Pilot.Study.Kamil.Grajski.28Feb2025.pdf)
 
 Note: If you get the message that git cannot display such large html then download the figs folder and display locally.
 
