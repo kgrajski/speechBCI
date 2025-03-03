@@ -25,7 +25,7 @@ Assuming that one has gained access to the dataset, there are two stages to usin
 * The ETL stage is implemented in the **etl.py**d script.
      This dices and slices and rearranges the raw data based on the Willett paper and data set README.
      This is a necessary step to make sure that processing and display can be mapped backed to physical location of the electrode.
-* The VQ-VAE stage is implemented in the dev_vqvae.py script.
+* The VQ-VAE stage is implemented in the **dev_vqvae.py** script.
      This script manages the training, testing, and validation loop for the ETL data.
      The script leverages GPU if available and puts results to TensorBoard.
 
