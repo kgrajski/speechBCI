@@ -10,14 +10,14 @@ The purpose of this repo is to explore an open-source data set comprised of elec
 The following set of slides describes this project.
 [Speech Decoding Pilot Study (Kamil Grajski 28Feb2025).pdf](https://github.com/user-attachments/files/19057861/Speech.Decoding.Pilot.Study.Kamil.Grajski.28Feb2025.pdf)
 
-Note: If you get the message that git cannot display such large html then download the figs folder and display locally.
-
 This animation is from a single trial during which the subject "spoke" a sentence.
 Each point in the grid corresponds to an electrode.  The data is shown as a heat map.
 [Example Animation](figs/competitionData/train/t12.2022.05.05_1_0_implot.html)
 
 This image is from the same animation as above, but shown as a time series.
 [Example Time Series](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
+
+Note: If you get the message that git cannot display such large html then download the figs folder and display locally.
 
 ## Getting Started
 
