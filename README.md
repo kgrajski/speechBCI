@@ -2,7 +2,7 @@
 
 The purpose of this repo is to explore an open-source data set comprised of electrode array recordings of nueral activity during speech generation.
 
-* Willett, et al. (2023). A high-performance neural speech prosthesis. Nature. 620:1031-1036.
+* Willett, et al. (2023). A high-performance neural speech prosthesis. _Nature_. 620:1031-1036.
 * https://datadryad.org/dataset/doi:10.5061/dryad.x69p8czpq
 
 ## Description
