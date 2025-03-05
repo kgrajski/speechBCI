@@ -252,14 +252,22 @@ def main():
     model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
     
     exp_name = "VQVAE_Simple_3D"
-    num_epochs = 100
+    num_epochs = 10
+    
+    encoder_depth = 16
     encoder_in_channels = 2
     encoder_out_channels = 64
+    
+        # Recall convention for Conv3D: N x C x D x H x W
     kernel_size = 4
-    stride = 2
-    padding = 0
-    embedding_dim = 32 # Normally, same as encoder_out_channels, but we add a Conv layer.
-    num_embeddings = 64
+    stride = 1
+    padding = 1
+    
+    num_resid_layers = 2
+    num_resid_channels = 32
+    
+    embedding_dim = 64 # Note: an conv layer takes encoder_out_channels to embedding_dim
+    num_embeddings = 256
     commitment_cost = 0.25
     decay = 0.99
     learning_rate = 1e-3
@@ -275,7 +283,8 @@ def main():
     # and split the remaining data into training and validation sets.
     # Note: in the official competition, there is an identified validation set.
     #
-    study_dataset = SpeechBCIDataSet_3D(etl_dir, kernel_size)
+    torch.autograd.set_detect_anomaly(True)
+    study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth)
     train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
     val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is True]
 
@@ -288,7 +297,8 @@ def main():
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     model = VQVAE(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
-                num_embeddings, embedding_dim, commitment_cost, decay).to(device)
+                  num_resid_layers, num_resid_channels,
+                  num_embeddings, embedding_dim, commitment_cost, decay).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
     
     run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,

@@ -39,16 +39,16 @@ class SpeechBCIDataSet_3D(Dataset):
         target_transform (callable, optional): Optional transform to be applied on the target.
     """
     
-    def __init__(self, etl_dir, kernel_size, transform=None, target_transform=None):
+    def __init__(self, etl_dir, depth, transform=None, target_transform=None):
         # The val_flag will have same length as samples, with True indicating validation sample.
-        self.samples, self.val_flag = self.gen_dataset(etl_dir, kernel_size)
+        self.samples, self.val_flag = self.gen_dataset(etl_dir, depth)
         self.transform = transform
         self.target_transform = target_transform
 
     def __len__(self):
         return len(self.samples)
 
-    def gen_dataset(self, etl_dir, kernel_size, kernel_multiplier=2):
+    def gen_dataset(self, etl_dir, depth):
         """
         Generate the dataset by reading ETL files from the specified directory.
 
@@ -89,8 +89,8 @@ class SpeechBCIDataSet_3D(Dataset):
                 tmp_val_flag = True
             else:
                 tmp_val_flag = False
-            for islice in range(working_array.shape[1] - kernel_multiplier * kernel_size + 1):
-                tmp = working_array[:, islice:islice+kernel_multiplier*kernel_size, :, :]
+            for islice in range(working_array.shape[1] - depth + 1):
+                tmp = working_array[:, islice:islice+depth, :, :]
                 samples.append(tmp) # CxTxHxW
                 val_flag.append(tmp_val_flag)
 

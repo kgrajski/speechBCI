@@ -174,9 +174,42 @@ class VectorQuantizerEMA(nn.Module):
         # 3D: convert quantized from BDHWC -> BCDHW
         #return loss, quantized.permute(0, 3, 1, 2).contiguous(), perplexity, encodings
         return loss, quantized.permute(0, 4, 1, 2, 3).contiguous(), perplexity, encodings
+    
+class Residual(nn.Module):
+    def __init__(self, in_channels, num_hiddens, kernel_size, stride, padding, num_residual_hiddens):
+            # Note the adjustment to kernel_size in the first Conv3d layer
+        super(Residual, self).__init__()
+        self._block = nn.Sequential(
+            nn.ReLU(False),
+            nn.Conv3d(in_channels=in_channels,
+                      out_channels=num_residual_hiddens,
+                      kernel_size=kernel_size-1, stride=stride, padding=padding, bias=False),
+            nn.ReLU(False),
+            nn.Conv3d(in_channels=num_residual_hiddens,
+                      out_channels=num_hiddens,
+                      kernel_size=1, stride=1, bias=False)
+        )
+
+    def forward(self, x):
+        return x + self._block(x)
+
+class ResidualStack(nn.Module):
+    def __init__(self, in_channels, num_hiddens, kernel_size, stride, padding,
+                 num_residual_layers, num_residual_hiddens):
+        super(ResidualStack, self).__init__()
+        self._num_residual_layers = num_residual_layers
+        self._layers = nn.ModuleList([Residual(in_channels, num_hiddens,
+                                               kernel_size, stride, padding, num_residual_hiddens)
+                                      for _ in range(self._num_residual_layers)])
+
+    def forward(self, x):
+        for i in range(self._num_residual_layers):
+            x = self._layers[i](x)
+        return F.relu(x, inplace=False)
 
 class Encoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding,
+                 num_residual_layers, num_residual_channels):
         super(Encoder, self).__init__()
         self._conv_1 = nn.Conv3d(in_channels=in_channels,
                                  out_channels=out_channels//2,
@@ -190,11 +223,17 @@ class Encoder(nn.Module):
                                  stride=stride,
                                  padding=padding)
 
+            # Note: the residual stack in and out channels need to be the same
+        self._residual_stack = ResidualStack(out_channels, out_channels,
+                                             kernel_size, stride, padding,
+                                             num_residual_layers, num_residual_channels)
+
     def forward(self, inputs):
         x = self._conv_1(inputs)
-        x = F.relu(x)
+        x = F.relu(x, inplace=False)
         x = self._conv_2(x)
-        x = F.relu(x)
+        x = F.relu(x, inplace=False)
+        x = self._residual_stack(x)
         return x
     
 class Decoder(nn.Module):
@@ -222,10 +261,11 @@ class Decoder(nn.Module):
 
 class VQVAE(nn.Module):
     def __init__(self, encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
-                 num_embeddings, embedding_dim, commitment_cost, decay=0):
+                 num_resid_layers, num_resid_channels, num_embeddings, embedding_dim, commitment_cost, decay):
         super(VQVAE, self).__init__()
 
-        self._encoder = Encoder(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding)
+        self._encoder = Encoder(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
+                                num_resid_layers, num_resid_channels)
         
         self._pre_vq_conv = nn.Conv3d(in_channels=encoder_out_channels, out_channels=embedding_dim,
                                       kernel_size=1, stride=1, padding=0)
@@ -234,8 +274,7 @@ class VQVAE(nn.Module):
         else:
             self._vq_vae = VectorQuantizer(num_embeddings, embedding_dim, commitment_cost)
         
-        self._decoder = Decoder(embedding_dim, encoder_out_channels, encoder_in_channels,
-                                kernel_size, stride, padding)
+        self._decoder = Decoder(embedding_dim, encoder_out_channels, encoder_in_channels, kernel_size, stride, padding)
 
     def forward(self, x):
         z = self._encoder(x)
