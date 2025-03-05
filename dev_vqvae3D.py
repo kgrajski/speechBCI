@@ -32,7 +32,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.utils as vutils
 from torchvision.utils import make_grid
@@ -42,7 +42,9 @@ import umap
 
 import vutils
 
-from SpeechBCIDataSet_2D import SpeechBCIDataSet_2D
+from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
+from Vqvae_Simple3D import VQVAE
+
 
 #
 # Local Code
@@ -70,7 +72,7 @@ def count_parameters(model):
     """
     return sum(p.numel() for p in model.parameters())
 
-def count_trainable_parameters(model):
+def count_trainable_parameters(model, show_details=False):
     """
     Returns the number of trainable parameters in the model.
 
@@ -80,6 +82,10 @@ def count_trainable_parameters(model):
     Returns:
         int: Number of trainable parameters.
     """
+    if show_details:
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(name, param.numel())
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
@@ -105,7 +111,7 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         print("##### Start Exp =", exp_name)
         print(model)
         print(f"Total parameters: {count_parameters(model)}")
-        print(f"Trainable parameters: {count_trainable_parameters(model)}")
+        print(f"Trainable parameters: {count_trainable_parameters(model, True)}")
         
         for iepoch in range(num_epochs):
             print(f"Epoch {iepoch+1}\n-------------------------------")
@@ -175,7 +181,6 @@ def train(loader, model, optimizer, device):
     model.train()
     for data in loop:
         data = data.to(device)
-        print(data.shape)
         optimizer.zero_grad()
         vq_loss, data_recon, perplexity = model(data)
         recon_error = F.mse_loss(data_recon, data) / 255.0
@@ -228,7 +233,7 @@ def main():
     """
     Main function to set up the experiment and run it.
     """
-    script_name = "dev_vqvae"
+    script_name = "dev_vqvae3D"
     start_time = time.perf_counter()
     print("*** " + script_name + " - START ***\n")
     
@@ -246,42 +251,51 @@ def main():
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
     
-    val_prop = 0.2
+    exp_name = "VQVAE_Simple_3D"
+    num_epochs = 100
+    encoder_in_channels = 2
+    encoder_out_channels = 64
+    kernel_size = 4
+    stride = 2
+    padding = 1
+    embedding_dim = 32 # Normally, same as encoder_out_channels, but we add a Conv layer.
+    num_embeddings = 64
+    commitment_cost = 0.25
+    decay = 0.99
+    learning_rate = 1e-3
+    training = True
+    
     test_prop = 0.2
-    train_prop = 1 - val_prop - test_prop
+    train_prop = 1 - test_prop
     batch_size = 512
     
-    study_dataset = SpeechBCIDataSet_2D(etl_dir)
-    train_dataset, val_dataset, test_dataset = random_split(study_dataset, [train_prop, val_prop, test_prop])
-    train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    
-    if 1:
-        from Vqvae_Classic2D import VQVAE
-        exp_name = "VQVAE_2D"
-        num_epochs = 100
-        encoder_in_channels = 2
-        num_hiddens = 128
-        num_residual_hiddens = 32
-        num_residual_layers = 1
-        embedding_dim = 32
-        num_embeddings = 64
-        commitment_cost = 0.25
-        decay = 0.99
-        learning_rate = 1e-3
-        training = True
+        #
+        # Per Willett, et al. competition data, the last block in each session
+        # should be used as the test set.  Here, we'll call that set the validation set
+        # and split the remaining data into training and validation sets.
+        # Note: in the official competition, there is an identified validation set.
+        #
+    study_dataset = SpeechBCIDataSet_3D(etl_dir, kernel_size)
+    train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
+    val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is True]
 
-        model = VQVAE(encoder_in_channels, num_hiddens, num_residual_layers, num_residual_hiddens,
-                    num_embeddings, embedding_dim, commitment_cost, decay).to(device)
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
-        
-        run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
-                training=training, model_dir=model_dir, show_plots=True)
+    train_test_dataset = Subset(study_dataset, train_test_indices)
+    train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
+    val_dataset = Subset(study_dataset, val_indices)
+    
+    train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    model = VQVAE(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
+                num_embeddings, embedding_dim, commitment_cost, decay).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
+    
+    run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
+            training=training, model_dir=model_dir, show_plots=True)
 
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")
             
 if __name__ == '__main__':
     main()
-
