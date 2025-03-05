@@ -5,6 +5,8 @@ The purpose of this repo is to explore an open-source data set comprised of elec
 * Willett, et al. (2023). A high-performance neural speech prosthesis. _Nature_. 620:1031-1036.
 * https://datadryad.org/dataset/doi:10.5061/dryad.x69p8czpq
 
+Skills applied: Python, PyTorch, CNN, VQ-VAE, CUDA/GPU, AWS, Visual Studio Code, GitHub Co-Pilot.
+
 ## Description
 
 The following set of slides describes this project.
