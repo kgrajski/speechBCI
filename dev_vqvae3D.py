@@ -1,11 +1,11 @@
 """
-This module defines and runs experiments for a Vector Quantized Variational Autoencoder (VQVAE)
+This module defines and runs experiments for a 3D Vector Quantized Variational Autoencoder (VQVAE)
 model on Speech BCI data. It includes functions for training, testing, and validating the model,
 as well as visualizing the results using TensorBoard.
 
 Functions:
     count_parameters(model): Returns the total number of parameters in the model.
-    count_trainable_parameters(model): Returns the number of trainable parameters in the model.
+    count_trainable_parameters(model, show_details=False): Returns the number of trainable parameters in the model.
     run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
             training=True, model_dir=None, show_plots=True): Runs the experiment, including training,
             testing, validation, and visualization.
@@ -15,7 +15,7 @@ Functions:
 
 Usage example:
     Run the script from the command line to train and evaluate the VQVAE model:
-    $ python dev_vqvae.py
+    $ python dev_vqvae3D.py
 """
 
 import sys
@@ -44,7 +44,6 @@ import vutils
 
 from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
 from Vqvae_Simple3D import VQVAE
-
 
 #
 # Local Code
@@ -78,6 +77,7 @@ def count_trainable_parameters(model, show_details=False):
 
     Args:
         model (torch.nn.Module): The model to count trainable parameters for.
+        show_details (bool, optional): Whether to print details of each parameter. Defaults to False.
 
     Returns:
         int: Number of trainable parameters.
@@ -269,12 +269,12 @@ def main():
     train_prop = 1 - test_prop
     batch_size = 512
     
-        #
-        # Per Willett, et al. competition data, the last block in each session
-        # should be used as the test set.  Here, we'll call that set the validation set
-        # and split the remaining data into training and validation sets.
-        # Note: in the official competition, there is an identified validation set.
-        #
+    #
+    # Per Willett, et al. competition data, the last block in each session
+    # should be used as the test set.  Here, we'll call that set the validation set
+    # and split the remaining data into training and validation sets.
+    # Note: in the official competition, there is an identified validation set.
+    #
     study_dataset = SpeechBCIDataSet_3D(etl_dir, kernel_size)
     train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
     val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is True]

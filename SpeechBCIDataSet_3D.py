@@ -7,7 +7,7 @@ Classes:
     SpeechBCIDataSet_3D: A custom PyTorch Dataset for Speech BCI Array Recordings.
 
 Usage example:
-    dataset = SpeechBCIDataSet_3D(etl_dir="/path/to/etl")
+    dataset = SpeechBCIDataSet_3D(etl_dir="/path/to/etl", kernel_size=5)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
     for data in dataloader:
         # process data
@@ -34,12 +34,13 @@ class SpeechBCIDataSet_3D(Dataset):
 
     Args:
         etl_dir (str): Directory containing the ETL files.
+        kernel_size (int): Size of the kernel to be used for slicing the time series.
         transform (callable, optional): Optional transform to be applied on a sample.
         target_transform (callable, optional): Optional transform to be applied on the target.
     """
     
     def __init__(self, etl_dir, kernel_size, transform=None, target_transform=None):
-            # The val_flag will have same length as samples, with True indicating validation sample.
+        # The val_flag will have same length as samples, with True indicating validation sample.
         self.samples, self.val_flag = self.gen_dataset(etl_dir, kernel_size)
         self.transform = transform
         self.target_transform = target_transform
@@ -53,9 +54,13 @@ class SpeechBCIDataSet_3D(Dataset):
 
         Args:
             etl_dir (str): Directory containing the ETL files.
+            kernel_size (int): Size of the kernel to be used for slicing the time series.
+            kernel_multiplier (int, optional): Multiplier for the kernel size. Default is 2.
 
         Returns:
-            np.ndarray: Array of samples.
+            tuple: A tuple containing:
+                - np.ndarray: Array of samples.
+                - list: List of boolean flags indicating validation samples.
         """
         basefile_names = [f.split('.')[0] for f in os.listdir(etl_dir) if f.endswith('.csv')]
         idkeys = []

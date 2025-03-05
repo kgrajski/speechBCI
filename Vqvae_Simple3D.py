@@ -6,6 +6,21 @@ See Vqvae_Classic2D.py for the acknowledgements.
 
 This code implements a very simple VQ-VAE architecture that uses Conv3D layers.
 
+Classes:
+    VectorQuantizer: A PyTorch module for vector quantization.
+    VectorQuantizerEMA: A PyTorch module for vector quantization with exponential moving average.
+    Encoder: A simple 3D convolutional encoder.
+    Decoder: A simple 3D convolutional decoder.
+    VQVAE: A VQ-VAE model with 3D convolutional layers.
+
+Usage example:
+    model = VQVAE(encoder_in_channels=1, encoder_out_channels=64, kernel_size=3, stride=2, padding=1,
+                  num_embeddings=512, embedding_dim=64, commitment_cost=0.25, decay=0.99)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    data = torch.randn(16, 1, 32, 32, 32)  # Example input data
+    loss, recon, perplexity = model(data)
+    loss.backward()
+    optimizer.step()
 """
 
 from __future__ import print_function
