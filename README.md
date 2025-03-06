@@ -29,7 +29,9 @@ Assuming that one has gained access to the dataset, there are two stages to usin
      This is a necessary step to make sure that processing and display can be mapped backed to physical location of the electrode.
 * The VQ-VAE stage is implemented in the **dev_vqvae.py** script.
      This script manages the training, testing, and validation loop for the ETL data.
-     The script leverages GPU if available and puts results to TensorBoard.
+     The script leverages GPU if available and puts results to TensorBoard
+     This was used for 2D exploration.
+* The VQ-VAE 3D stage is implemented in the **main_vqvae3D.py**.  Have refactored code to push the functions needed to run experiments to **utils_vqvae.p**y.
 
 ### Dependencies
 
