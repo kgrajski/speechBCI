@@ -22,7 +22,7 @@ from ray import tune
 from ray.tune.schedulers import ASHAScheduler
 
 from Vqvae_Simple3D import VQVAE
-from utils_vqvae_ray_rev2 import train_vqvae
+from utils_vqvae_ray import train_vqvae
 
 def main():
     """
@@ -69,7 +69,7 @@ def main():
     }
     
     scheduler = ASHAScheduler(
-        metric="reconstruction_loss_test",
+        metric="reconstruction_loss_train",
         mode="min",
         max_t=100,
         grace_period=5,
