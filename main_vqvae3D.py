@@ -4,6 +4,13 @@ model on Speech BCI data. It includes the main function to initialize the experi
 
 Functions:
     main(): Main function to set up the experiment and run it.
+    
+    Reminder: To monitor GPU utilization, use the following command:
+        nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
+
+    Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
+        tensorboard --logdir=runs
+    Then open a browser tab to http://localhost:6006/
 """
 
 import sys
