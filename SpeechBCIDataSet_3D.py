@@ -40,8 +40,15 @@ class SpeechBCIDataSet_3D(Dataset):
     """
     
     def __init__(self, etl_dir, depth, transform=None, target_transform=None):
+        #
         # The val_flag will have same length as samples, with True indicating validation sample.
-        self.samples, self.val_flag = self.gen_dataset(etl_dir, depth)
+        # The sample_idkey will make it easy later to recombine samples to the original data.
+        # The embed_index will be used to track the embedding index for each sample - after the
+        # embedding is applied with a trained model.
+        # The slice_id will be used to track the slice index for each sample - just to make sure
+        # that when embedding is done original order is preserved.  [An excess of caution here.]
+        #
+        self.samples, self.val_flag, self.sample_idkey, self.embed_index, self.slice_id = self.gen_dataset(etl_dir, depth)
         self.transform = transform
         self.target_transform = target_transform
 
@@ -77,6 +84,9 @@ class SpeechBCIDataSet_3D(Dataset):
         
         samples = []
         val_flag = []
+        sample_idkey = []
+        embed_index = []
+        slice_id = []
         for idkey in idkeys:
             working_array = []
             for var_name in var_names:
@@ -93,9 +103,12 @@ class SpeechBCIDataSet_3D(Dataset):
                 tmp = working_array[:, islice:islice+depth, :, :]
                 samples.append(tmp) # CxTxHxW
                 val_flag.append(tmp_val_flag)
+                sample_idkey.append(idkey)
+                embed_index.append(None)
+                slice_id.append(islice)
 
         print(f"Generated {len(samples)} samples including {sum(val_flag)} for validation.")
-        return samples, val_flag
+        return samples, val_flag, sample_idkey, embed_index, slice_id
     
     def __getitem__(self, idx):
         """

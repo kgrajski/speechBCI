@@ -4,7 +4,9 @@ model on Speech BCI data. It includes the main function to initialize the experi
 
 Functions:
     main(): Main function to set up the experiment and run it.
+"""
     
+"""
     Reminder: To monitor GPU utilization, use the following command:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
@@ -26,7 +28,7 @@ from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
 from Vqvae_Simple3D import VQVAE
-from utils_vqvae import run_exp
+from utils_vqvae import run_exp, embed_data
 
 def main():
     """
@@ -49,6 +51,7 @@ def main():
     
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
+    embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
     
     exp_name = "VQVAE_Simple_3D"
     num_epochs = 100
@@ -70,7 +73,8 @@ def main():
     commitment_cost = 0.25
     decay = 0.99
     learning_rate = 1e-3
-    training = True
+    
+    training = False
     
     test_prop = 0.2
     train_prop = 1 - test_prop
@@ -100,8 +104,17 @@ def main():
                   num_embeddings, embedding_dim, commitment_cost, decay).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
     
-    run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
-            training=training, model_dir=model_dir, show_plots=True)
+    if training:
+        run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
+                model_dir=model_dir, show_plots=True)
+    
+        #
+        # Use the trained model to generate embeddings for the train, test, and validation sets
+        #
+    model.load_state_dict(torch.load(os.path.join(model_dir, exp_name, exp_name + "_final" + ".pt")))
+    embed_data(model, train_dataset, device, embed_dir, "train")
+    embed_data(model, test_dataset, device, embed_dir, "test")
+    embed_data(model, val_dataset, device, embed_dir, "val")
 
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")

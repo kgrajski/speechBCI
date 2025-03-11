@@ -172,7 +172,6 @@ class VectorQuantizerEMA(nn.Module):
         # 2D: convert quantized from BHWC -> BCHW
         # 2D: return loss, quantized.permute(0, 3, 1, 2).contiguous(), perplexity, encodings
         # 3D: convert quantized from BDHWC -> BCDHW
-        #return loss, quantized.permute(0, 3, 1, 2).contiguous(), perplexity, encodings
         return loss, quantized.permute(0, 4, 1, 2, 3).contiguous(), perplexity, encodings
     
 class Residual(nn.Module):
@@ -258,7 +257,6 @@ class Decoder(nn.Module):
         x = self._conv_trans_2(x)
         return x
 
-
 class VQVAE(nn.Module):
     def __init__(self, encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
                  num_resid_layers, num_resid_channels, num_embeddings, embedding_dim, commitment_cost, decay):
@@ -282,3 +280,4 @@ class VQVAE(nn.Module):
         loss, quantized, perplexity, _ = self._vq_vae(z)
         x_recon = self._decoder(quantized)
         return loss, x_recon, perplexity
+    

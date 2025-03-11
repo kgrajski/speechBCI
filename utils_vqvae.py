@@ -22,6 +22,25 @@ import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
+def embed_chunks(model, loader, device):
+    loop = tqdm(loader, leave=True, position=0)
+    model.eval()
+    with torch.no_grad():
+        for data in loop:
+            data = data.to(device)
+            vq_output = model._pre_vq_conv(model._encoder(data))
+            _, _, _, encodings = model._vq_vae(vq_output)
+            if 'embedded' in locals():
+                embedded = torch.cat((embedded, encodings), 0)
+            else:
+                embedded = encodings
+    return embedded
+
+def embed_data(model, train_dataset, device, embed_dir, dataset_type):
+    x = DataLoader(train_dataset, batch_size=1, shuffle=False)
+    x = embed_chunks(model, x, device)
+    torch.save(x, os.path.join(embed_dir, dataset_type + "_embedded.pt"))
+
 def count_parameters(model):
     """
     Returns the total number of parameters in the model.
@@ -118,7 +137,7 @@ def test(loader, model, device):
     return data_recon_avg, vq_loss_avg, perplexity_avg
 
 def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
-            training=True, model_dir=None, show_plots=True):
+            model_dir=None, show_plots=True):
     """
     Runs the experiment, including training, testing, validation, and visualization.
 
@@ -136,44 +155,42 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         show_plots (bool, optional): Whether to generate and save plots. Defaults to True.
     """
     writer = SummaryWriter(os.path.join("runs" + os.sep + exp_name))
-    if training:
-        print("##### Start Exp =", exp_name)
-        print(model)
-        print(f"Total parameters: {count_parameters(model)}")
-        print(f"Trainable parameters: {count_trainable_parameters(model, True)}")
-        
-        for iepoch in range(num_epochs):
-            print(f"Epoch {iepoch+1}\n-------------------------------")
-            data_recon, vq_loss, perplexity = train(train_dl, model, optimizer, device)
-            writer.add_scalar("loss/train/reconstruction", data_recon.item(), iepoch)
-            writer.add_scalar("loss/train/quantization", vq_loss.item(), iepoch)
-            writer.add_scalar("loss/train/perplexity", perplexity.item(), iepoch)
-            print(f"Train Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
-            
-            data_recon, vq_loss, perplexity = test(test_dl, model, device)
-            writer.add_scalar("loss/test/reconstruction", data_recon.item(), iepoch)
-            writer.add_scalar("loss/test/quantization", vq_loss.item(), iepoch)
-            writer.add_scalar("loss/test/perplexity", perplexity.item(), iepoch)
-            print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
-            
-            if (model_dir is not None):
-                torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_" + str(iepoch) + ".pt"))
-            
-        data_recon, vq_loss, perplexity = test(val_dl, model, device)
-        writer.add_scalar("loss/val/reconstruction", data_recon.item(), iepoch)
-        writer.add_scalar("loss/val/quantization", vq_loss.item(), iepoch)
-        writer.add_scalar("loss/val/perplexity", perplexity.item(), iepoch)
-        print(f"Validation Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
 
-        if model_dir is not None:
-            torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_final" + ".pt"))
+    print("##### Start Exp =", exp_name)
+    print(model)
+    print(f"Total parameters: {count_parameters(model)}")
+    print(f"Trainable parameters: {count_trainable_parameters(model, True)}")
     
-    else:
-        model.load_state_dict(torch.load(os.path.join(model_dir, exp_name + ".pt")))
+    for iepoch in range(num_epochs):
+        print(f"Epoch {iepoch+1}\n-------------------------------")
+        data_recon, vq_loss, perplexity = train(train_dl, model, optimizer, device)
+        writer.add_scalar("loss/train/reconstruction", data_recon.item(), iepoch)
+        writer.add_scalar("loss/train/quantization", vq_loss.item(), iepoch)
+        writer.add_scalar("loss/train/perplexity", perplexity.item(), iepoch)
+        print(f"Train Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+        
+        data_recon, vq_loss, perplexity = test(test_dl, model, device)
+        writer.add_scalar("loss/test/reconstruction", data_recon.item(), iepoch)
+        writer.add_scalar("loss/test/quantization", vq_loss.item(), iepoch)
+        writer.add_scalar("loss/test/perplexity", perplexity.item(), iepoch)
+        print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+        
+        if (model_dir is not None):
+            torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_" + str(iepoch) + ".pt"))
+        
+    data_recon, vq_loss, perplexity = test(val_dl, model, device)
+    writer.add_scalar("loss/val/reconstruction", data_recon.item(), iepoch)
+    writer.add_scalar("loss/val/quantization", vq_loss.item(), iepoch)
+    writer.add_scalar("loss/val/perplexity", perplexity.item(), iepoch)
+    print(f"Validation Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+
+    if model_dir is not None:
+        torch.save(model.state_dict(), os.path.join(model_dir, exp_name, exp_name + "_final" + ".pt"))
         
     if show_plots:
         proj = umap.UMAP(n_neighbors=3, min_dist=0.1,
-                         metric="cosine").fit_transform(model._vq_vae._embedding.weight.data.cpu())
+                    metric="cosine").fit_transform(model._vq_vae._embedding.weight.data.cpu())
+        
         fig, ax = plt.subplots()
         ax.scatter(proj[:,0], proj[:,1])
         ax.set_title("Embedding Space Representation")
