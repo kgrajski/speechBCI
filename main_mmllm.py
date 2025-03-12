@@ -26,15 +26,14 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, random_split
 
-from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
-from Vqvae_Simple3D import VQVAE
-from utils_vqvae import run_exp, embed_studydata
+from SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
+from utils_mmllm import run_exp
 
 def main():
     """
     Main function to set up the experiment and run it.
     """
-    script_name = "main_vqvae3D"
+    script_name = "main_mmllm"
     start_time = time.perf_counter()
     print("*** " + script_name + " - START ***\n")
     
@@ -49,7 +48,7 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
     
-    exp_name = "VQVAE_Simple_3D"
+    exp_name = "MM_LLM"
     
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
@@ -59,25 +58,7 @@ def main():
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     
     num_epochs = 100
-    
-    encoder_depth = 16
-    encoder_in_channels = 2
-    encoder_out_channels = 64
-    
-    # Recall convention for Conv3D: N x C x D x H x W
-    kernel_size = 4
-    stride = 2
-    padding = 1
-    
-    num_resid_layers = 2
-    num_resid_channels = 32
-    
-    embedding_dim = 64 # Note: an conv layer takes encoder_out_channels to embedding_dim
-    num_embeddings = 256
-    commitment_cost = 0.25
-    decay = 0.99
     learning_rate = 1e-3
-    
     training = False
     
     test_prop = 0.2
@@ -88,13 +69,26 @@ def main():
     # Per Willett, et al. competition data, the last block in each session
     # should be used as the test set.  Here, we'll call that set the validation set
     # and split the remaining data into training and validation sets.
-    # Note: in the official competition, there is an identified validation set.
+    # Note: in the official competition, there is a distinct validation (holdout) set.
     #
-    torch.autograd.set_detect_anomaly(True)
-    study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth)
+    #torch.autograd.set_detect_anomaly(True)
+    study_dataset = SpeechBCIDataSet_Embedded(etl_dir, embed_dir)
+    
+    #
+    # Recall that we are using competition data.  That study defines the last block in
+    # each session as the test set.  And in such case the validation set is the data
+    # that was withheld. At the risk of short changing the training set here, we'll
+    # use the last block in each session as the withheld validation set.  The remaining
+    # data we'll split into the traditional training and test set.
+    # Consequently, it makes sense to have a quick 
+    #
+    # Generate some statistics on the words in the training and testing sets.
+    #
+    study_dataset._train_test_label_compare()
+    
+    # Now subset the study data as described above.
     train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
     val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is True]
-
     train_test_dataset = Subset(study_dataset, train_test_indices)
     train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
     val_dataset = Subset(study_dataset, val_indices)
@@ -103,23 +97,12 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = VQVAE(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
-                  num_resid_layers, num_resid_channels,
-                  num_embeddings, embedding_dim, commitment_cost, decay).to(device)
+    model = None
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
     
     if training:
         run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
                 model_dir=model_dir, show_plots=True, tensorboard_dir=tensorboard_dir)
-    
-        #
-        # Use the trained model to generate embeddings for the train, test, and validation sets
-        #  Print the model as a refresh and sanity check.
-        #
-    model.load_state_dict(torch.load(os.path.join(model_dir, exp_name + "_final" + ".pt")))
-    model.eval()
-    print(model)
-    embed_studydata(model, study_dataset, device, embed_dir)
 
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")

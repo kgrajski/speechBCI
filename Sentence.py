@@ -51,7 +51,7 @@ class Sentence:
                 self.idkey = f.readline().strip()
                 self.max_block_id = int(f.readline().strip())
                 self.num_samples = int(f.readline().strip())
-                self.sentence_txt = int(f.readline().strip())
+                self.sentence_txt = f.readline().strip()
                 self.session_id = f.readline().strip()
                 self.trial_id = int(f.readline().strip())
         except Exception as e:

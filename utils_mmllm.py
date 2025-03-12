@@ -22,56 +22,6 @@ import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
-    # Function to embed the study data
-def embed_studydata(model, study_dataset, device, embed_dir):
-    
-        # Set the model to eval mode.
-    model.eval()
-    torch.no_grad()
-    
-        # Create the subdirectory for train and test embeddings if it doesn't exist.
-    subdir = os.path.join(embed_dir, 'train')
-    os.makedirs(subdir, exist_ok=True)
-    subdir = os.path.join(embed_dir, 'test')
-    os.makedirs(subdir, exist_ok=True)
-    
-        # Get the set of unique sample idkeys in the study_dataset
-    sample_idkeys = set(study_dataset.sample_idkey)
-
-        # Set up to identify the longest sample series.  This will
-        # help determine the context window for the upcoming MM-LLM.
-    max_series_len = 0
-    
-        # For each sample idkey, embed the samples, add positional encoding,
-        # and save the embeddings.
-    for idkey in sample_idkeys:
-        indices = [i for i in range(len(study_dataset)) if study_dataset.sample_idkey[i] == idkey]
-        indices = sorted(indices) # Ensure the indices are in order
-            # Get the data for the sample idkey
-        subset = torch.utils.data.Subset(study_dataset, indices)
-        dataloader = DataLoader(subset, batch_size=len(indices), shuffle=False)
-        for data in dataloader:
-            data = data.to(device)
-            z = model._encoder(data)
-            z = model._pre_vq_conv(z)
-            _, _, _, embeddings = model._vq_vae(z)
-
-            # Determine the subdirectory based on val_flag
-        if study_dataset.val_flag[indices[0]]:
-            subdir = os.path.join(embed_dir, 'test')
-        else:
-            subdir = os.path.join(embed_dir, 'train')
-        filename = os.path.join(subdir, f'{idkey}.pt')
-        
-            # Change tensor type to int16, detach, and save to file
-        embeddings_int16 = embeddings.detach().to(torch.int16)
-        torch.save(embeddings_int16, filename)
-        
-        if len(indices) > max_series_len:
-            max_series_len = len(indices)
-        print(f"For idkey {idkey} of length {len(indices)} and data {data.shape}, saved embeddings {embeddings.shape}.")
-    print(f"Maximum series length: {max_series_len}")
-
 def count_parameters(model):
     """
     Returns the total number of parameters in the model.
@@ -250,3 +200,4 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         writer.add_graph(model, valid_originals)
 
     writer.close()
+    
