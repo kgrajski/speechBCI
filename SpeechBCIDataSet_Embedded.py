@@ -231,11 +231,15 @@ class SpeechBCIDataSet_Embedded(Dataset):
         Args:
             label_stats (dict): Dictionary containing various statistics and comparisons.
         """
+        # Exclude 'unique_words' and 'words' keys from train_stats and test_stats
+        train_stats_filtered = {k: v for k, v in label_stats['train_stats'].items() if k not in ['unique_words', 'words']}
+        test_stats_filtered = {k: v for k, v in label_stats['test_stats'].items() if k not in ['unique_words', 'words']}
+
         print("Training Set Statistics:")
-        print(tabulate(label_stats['train_stats'].items(), headers=['Statistic', 'Value'], tablefmt='grid'))
+        print(tabulate(train_stats_filtered.items(), headers=['Statistic', 'Value'], tablefmt='grid'))
 
         print("\nTesting Set Statistics:")
-        print(tabulate(label_stats['test_stats'].items(), headers=['Statistic', 'Value'], tablefmt='grid'))
+        print(tabulate(test_stats_filtered.items(), headers=['Statistic', 'Value'], tablefmt='grid'))
 
         print("\nCommon Words Count:", label_stats['common_words_count'])
         print("Unique Train Words Count:", label_stats['unique_train_words_count'])
