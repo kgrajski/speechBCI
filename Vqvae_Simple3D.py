@@ -182,15 +182,19 @@ class Residual(nn.Module):
             nn.ReLU(False),
             nn.Conv3d(in_channels=in_channels,
                       out_channels=num_residual_hiddens,
-                      kernel_size=kernel_size-1, stride=stride, padding=padding, bias=False),
+                        # This line needs to be manually tuned
+                      kernel_size=1, stride=1, padding=0,
+                      bias=False),
             nn.ReLU(False),
             nn.Conv3d(in_channels=num_residual_hiddens,
                       out_channels=num_hiddens,
-                      kernel_size=1, stride=1, bias=False)
+                      kernel_size=1, stride=1, padding=0,
+                      bias=False)
         )
 
     def forward(self, x):
-        return x + self._block(x)
+        y = self._block(x)
+        return x + y
 
 class ResidualStack(nn.Module):
     def __init__(self, in_channels, num_hiddens, kernel_size, stride, padding,
@@ -277,7 +281,7 @@ class VQVAE(nn.Module):
     def forward(self, x):
         z = self._encoder(x)
         z = self._pre_vq_conv(z)
-        loss, quantized, perplexity, _ = self._vq_vae(z)
+        loss, quantized, perplexity, embeddings = self._vq_vae(z)
         x_recon = self._decoder(quantized)
         return loss, x_recon, perplexity
     

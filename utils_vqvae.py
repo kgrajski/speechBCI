@@ -11,7 +11,7 @@ Functions:
     train(loader, model, optimizer, device): Trains the model for one epoch.
     test(loader, model, device): Tests the model.
 """
-
+import numpy as np
 import os
 import torch
 import torch.nn.functional as F
@@ -22,24 +22,51 @@ import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
-def embed_chunks(model, loader, device):
-    loop = tqdm(loader, leave=True, position=0)
+    # Function to embed the study data
+def embed_studydata(model, study_dataset, device, embed_dir):
+    
+        # Set the model to eval mode.
     model.eval()
-    with torch.no_grad():
-        for data in loop:
-            data = data.to(device)
-            vq_output = model._pre_vq_conv(model._encoder(data))
-            _, _, _, encodings = model._vq_vae(vq_output)
-            if 'embedded' in locals():
-                embedded = torch.cat((embedded, encodings), 0)
-            else:
-                embedded = encodings
-    return embedded
+    torch.no_grad()
+    
+        # Create the subdirectory for train and test embeddings if it doesn't exist.
+    subdir = os.path.join(embed_dir, 'train')
+    os.makedirs(subdir, exist_ok=True)
+    subdir = os.path.join(embed_dir, 'test')
+    os.makedirs(subdir, exist_ok=True)
+    
+        # Get the set of unique sample idkeys in the study_dataset
+    sample_idkeys = set(study_dataset.sample_idkey)
 
-def embed_data(model, train_dataset, device, embed_dir, dataset_type):
-    x = DataLoader(train_dataset, batch_size=1, shuffle=False)
-    x = embed_chunks(model, x, device)
-    torch.save(x, os.path.join(embed_dir, dataset_type + "_embedded.pt"))
+        # Set up to identify the longest sample series.  This will
+        # help determine the context window for the upcoming MM-LLM.
+    max_series_len = 0
+    
+        # For each sample idkey, embed the samples, add positional encoding,
+        # and save the embeddings.
+    for idkey in sample_idkeys:
+        indices = [i for i in range(len(study_dataset)) if study_dataset.sample_idkey[i] == idkey]
+        indices = sorted(indices) # Ensure the indices are in order
+            # Get the data for the sample idkey
+        subset = torch.utils.data.Subset(study_dataset, indices)
+        dataloader = DataLoader(subset, batch_size=len(indices), shuffle=False)
+        for data in dataloader:
+            data = data.to(device)
+            z = model._encoder(data)
+            z = model._pre_vq_conv(z)
+            _, _, _, embeddings = model._vq_vae(z)
+
+            # Determine the subdirectory based on val_flag
+        if study_dataset.val_flag[indices[0]]:
+            subdir = os.path.join(embed_dir, 'test')
+        else:
+            subdir = os.path.join(embed_dir, 'train')
+        filename = os.path.join(subdir, f'{idkey}.pt')
+        torch.save(embeddings.detach, filename)
+        if len(indices) > max_series_len:
+            max_series_len = len(indices)
+        print(f"For idkey {idkey} of length {len(indices)} and data {data.shape}, saved embeddings {embeddings.shape}.")
+    print(f"Maximum series length: {max_series_len}")
 
 def count_parameters(model):
     """
@@ -137,7 +164,7 @@ def test(loader, model, device):
     return data_recon_avg, vq_loss_avg, perplexity_avg
 
 def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
-            model_dir=None, show_plots=True):
+            model_dir=None, show_plots=True, tensorboard_dir=None):
     """
     Runs the experiment, including training, testing, validation, and visualization.
 
@@ -154,7 +181,8 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         model_dir (str, optional): Directory to save/load the model. Defaults to None.
         show_plots (bool, optional): Whether to generate and save plots. Defaults to True.
     """
-    writer = SummaryWriter(os.path.join("runs" + os.sep + exp_name))
+    os.makedirs(tensorboard_dir, exist_ok=True)
+    writer = SummaryWriter(tensorboard_dir)
 
     print("##### Start Exp =", exp_name)
     print(model)
@@ -176,6 +204,7 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
         
         if (model_dir is not None):
+            os.makedirs(model_dir, exist_ok=True)
             torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_" + str(iepoch) + ".pt"))
         
     data_recon, vq_loss, perplexity = test(val_dl, model, device)
@@ -185,7 +214,7 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
     print(f"Validation Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
 
     if model_dir is not None:
-        torch.save(model.state_dict(), os.path.join(model_dir, exp_name, exp_name + "_final" + ".pt"))
+        torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_final" + ".pt"))
         
     if show_plots:
         proj = umap.UMAP(n_neighbors=3, min_dist=0.1,
@@ -201,11 +230,17 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         vq_output_eval = model._pre_vq_conv(model._encoder(valid_originals))
         _, valid_quantize, _, _ = model._vq_vae(vq_output_eval)
         valid_reconstructions = model._decoder(valid_quantize)
-        
-        img_grid = make_grid(valid_originals, nrow=32, scale_each=True)
+
+        if len(valid_originals.shape) == 4:
+            img_grid = make_grid(valid_originals, nrow=16, scale_each=True)
+        else:
+            img_grid = make_grid(valid_originals[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
         writer.add_image("Originals", img_grid)
         
-        img_grid = make_grid(valid_reconstructions, nrow=32, scale_each=True)
+        if len(valid_reconstructions.shape) == 4:
+            img_grid = make_grid(valid_reconstructions, nrow=16, scale_each=True)
+        else:
+            img_grid = make_grid(valid_reconstructions[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
         writer.add_image("Reconstructions", img_grid)
         
         writer.add_graph(model, valid_originals)

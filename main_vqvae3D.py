@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir=runs
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_Simple_3D"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
 from Vqvae_Simple3D import VQVAE
-from utils_vqvae import run_exp, embed_data
+from utils_vqvae import run_exp, embed_studydata
 
 def main():
     """
@@ -49,11 +49,15 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
     
-    etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
-    model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
-    embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
-    
     exp_name = "VQVAE_Simple_3D"
+    
+    etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
+    embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
+    model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
+    model_dir = os.path.join(model_dir, exp_name)
+    tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
+    tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
+    
     num_epochs = 100
     
     encoder_depth = 16
@@ -62,7 +66,7 @@ def main():
     
     # Recall convention for Conv3D: N x C x D x H x W
     kernel_size = 4
-    stride = 1
+    stride = 2
     padding = 1
     
     num_resid_layers = 2
@@ -106,15 +110,20 @@ def main():
     
     if training:
         run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
-                model_dir=model_dir, show_plots=True)
+                model_dir=model_dir, show_plots=True, tensorboard_dir=tensorboard_dir)
     
         #
         # Use the trained model to generate embeddings for the train, test, and validation sets
+        #  Print the model as a refresh and sanity check.
         #
-    model.load_state_dict(torch.load(os.path.join(model_dir, exp_name, exp_name + "_final" + ".pt")))
-    embed_data(model, train_dataset, device, embed_dir, "train")
-    embed_data(model, test_dataset, device, embed_dir, "test")
-    embed_data(model, val_dataset, device, embed_dir, "val")
+    model.load_state_dict(torch.load(os.path.join(model_dir, exp_name + "_final" + ".pt")))
+    model.eval()
+    valid_originals = next(iter(val_dl)).to(device)
+    vq_output_eval = model._pre_vq_conv(model._encoder(valid_originals))
+    _, valid_quantize, _, _ = model._vq_vae(vq_output_eval)
+    valid_reconstructions = model._decoder(valid_quantize)
+  
+    embed_studydata(model, study_dataset, device, embed_dir)
 
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")
