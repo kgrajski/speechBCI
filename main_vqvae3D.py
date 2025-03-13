@@ -58,9 +58,10 @@ def main():
     tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     
-    num_epochs = 100
+    num_epochs = 3
     
-    encoder_depth = 16
+    encoder_depth = 16 # How many frames in a sample.
+    depth_step_size = 1 # The stride when making samples from the raw input data.
     encoder_in_channels = 2
     encoder_out_channels = 64
     
@@ -73,12 +74,13 @@ def main():
     num_resid_channels = 32
     
     embedding_dim = 64 # Note: an conv layer takes encoder_out_channels to embedding_dim
-    num_embeddings = 256
+    num_embeddings = 64
     commitment_cost = 0.25
     decay = 0.99
     learning_rate = 1e-3
     
-    training = False
+    training = True
+    encoding = False
     
     test_prop = 0.2
     train_prop = 1 - test_prop
@@ -91,7 +93,7 @@ def main():
     # Note: in the official competition, there is an identified validation set.
     #
     torch.autograd.set_detect_anomaly(True)
-    study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth)
+    study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth, depth_step_size)
     train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
     val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is True]
 
@@ -112,14 +114,15 @@ def main():
         run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
                 model_dir=model_dir, show_plots=True, tensorboard_dir=tensorboard_dir)
     
-        #
-        # Use the trained model to generate embeddings for the train, test, and validation sets
-        #  Print the model as a refresh and sanity check.
-        #
-    model.load_state_dict(torch.load(os.path.join(model_dir, exp_name + "_final" + ".pt")))
-    model.eval()
-    print(model)
-    embed_studydata(model, study_dataset, device, embed_dir)
+    if encoding:
+            #
+            # Use the trained model to generate embeddings for the train, test, and validation sets
+            #  Print the model as a refresh and sanity check.
+            #
+        model.load_state_dict(torch.load(os.path.join(model_dir, exp_name + "_final" + ".pt")))
+        model.eval()
+        print(model)
+        embed_studydata(model, study_dataset, device, embed_dir)
 
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")

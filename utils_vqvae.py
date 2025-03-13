@@ -22,6 +22,27 @@ import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
+def plot_embeddings_ts(embeddings, idkey, subdir):
+    """
+    Plots the time series of embeddings for a given idkey.
+    
+    Args:
+        embeddings (torch.Tensor): The embeddings to plot.
+        idkey (int): The idkey for the embeddings.
+        subdir (str): The subdirectory to save the plot.
+    """
+    # Convert embeddings to a list of indices
+    indices = torch.argmax(embeddings, dim=1).cpu().numpy()
+
+    # Create a time series plot of the indices
+    import plotly.express as px
+    fig = px.line(x=np.arange(len(indices)), y=indices, labels={'x': 'Time', 'y': 'Index'})
+    fig.update_layout(title=f'Time Series of Indices for idkey {idkey}')
+
+    # Save the plot to an HTML file
+    plot_filename = os.path.join(subdir, f'{idkey}_plot.html')
+    fig.write_html(plot_filename)
+
     # Function to embed the study data
 def embed_studydata(model, study_dataset, device, embed_dir):
     
@@ -42,6 +63,9 @@ def embed_studydata(model, study_dataset, device, embed_dir):
         # help determine the context window for the upcoming MM-LLM.
     max_series_len = 0
     
+        # Set up to generate statistics on the embeddings.
+        #
+    vq_codes = []
         # For each sample idkey, embed the samples, add positional encoding,
         # and save the embeddings.
     for idkey in sample_idkeys:
@@ -50,11 +74,15 @@ def embed_studydata(model, study_dataset, device, embed_dir):
             # Get the data for the sample idkey
         subset = torch.utils.data.Subset(study_dataset, indices)
         dataloader = DataLoader(subset, batch_size=len(indices), shuffle=False)
+        
         for data in dataloader:
             data = data.to(device)
             z = model._encoder(data)
             z = model._pre_vq_conv(z)
             _, _, _, embeddings = model._vq_vae(z)
+            
+            # Store the embeddings for the sample idkey
+        vq_codes.append([torch.argmax(embeddings, dim=1).cpu().numpy()])
 
             # Determine the subdirectory based on val_flag
         if study_dataset.val_flag[indices[0]]:
@@ -62,6 +90,9 @@ def embed_studydata(model, study_dataset, device, embed_dir):
         else:
             subdir = os.path.join(embed_dir, 'train')
         filename = os.path.join(subdir, f'{idkey}.pt')
+        
+            # Plot the time series of embeddings
+        plot_embeddings_ts(embeddings, idkey, subdir)
         
             # Change tensor type to int16, detach, and save to file
         embeddings_int16 = embeddings.detach().to(torch.int16)
@@ -71,6 +102,12 @@ def embed_studydata(model, study_dataset, device, embed_dir):
             max_series_len = len(indices)
         print(f"For idkey {idkey} of length {len(indices)} and data {data.shape}, saved embeddings {embeddings.shape}.")
     print(f"Maximum series length: {max_series_len}")
+    
+        # Flatten vq_codees and generate a histogram of the indices using plotly express and save
+    vq_codes = np.array(vq_codes).flatten()
+    fig = px.histogram(x=vq_codes, title='Histogram of VQ Indices')
+    fig.update_layout(bargap=0.1)
+    fig.write_html(os.path.join(embed_dir, 'histogram.html'))
 
 def count_parameters(model):
     """
@@ -239,13 +276,13 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
             img_grid = make_grid(valid_originals, nrow=16, scale_each=True)
         else:
             img_grid = make_grid(valid_originals[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
-        writer.add_image("Originals", img_grid)
+        #writer.add_image("Originals", img_grid)
         
         if len(valid_reconstructions.shape) == 4:
             img_grid = make_grid(valid_reconstructions, nrow=16, scale_each=True)
         else:
             img_grid = make_grid(valid_reconstructions[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
-        writer.add_image("Reconstructions", img_grid)
+        #writer.add_image("Reconstructions", img_grid)
         
         writer.add_graph(model, valid_originals)
 

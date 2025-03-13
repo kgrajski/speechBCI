@@ -39,7 +39,7 @@ class SpeechBCIDataSet_3D(Dataset):
         target_transform (callable, optional): Optional transform to be applied on the target.
     """
     
-    def __init__(self, etl_dir, depth, transform=None, target_transform=None):
+    def __init__(self, etl_dir, depth, depth_step_size, transform=None, target_transform=None):
         #
         # The val_flag will have same length as samples, with True indicating validation sample.
         # The sample_idkey will make it easy later to recombine samples to the original data.
@@ -48,14 +48,15 @@ class SpeechBCIDataSet_3D(Dataset):
         # The slice_id will be used to track the slice index for each sample - just to make sure
         # that when embedding is done original order is preserved.  [An excess of caution here.]
         #
-        self.samples, self.val_flag, self.sample_idkey, self.embed_index, self.slice_id = self.gen_dataset(etl_dir, depth)
+        self.samples, self.val_flag, self.sample_idkey, self.embed_index, self.slice_id = \
+            self.gen_dataset(etl_dir, depth, depth_step_size)
         self.transform = transform
         self.target_transform = target_transform
 
     def __len__(self):
         return len(self.samples)
 
-    def gen_dataset(self, etl_dir, depth):
+    def gen_dataset(self, etl_dir, depth, depth_step_size):
         """
         Generate the dataset by reading ETL files from the specified directory.
 
@@ -69,7 +70,8 @@ class SpeechBCIDataSet_3D(Dataset):
                 - np.ndarray: Array of samples.
                 - list: List of boolean flags indicating validation samples.
         """
-        basefile_names = [f.split('.')[0] for f in os.listdir(etl_dir) if f.endswith('.csv')]
+        basefile_names = sorted([f.split('.')[0] for f in os.listdir(etl_dir) if f.endswith('.csv')])
+        basefile_names = basefile_names[:11930]
         idkeys = []
         var_names = []
         for basefile in basefile_names:
@@ -77,11 +79,10 @@ class SpeechBCIDataSet_3D(Dataset):
             if not (parts[-1] == 'sentenceText'):
                 idkeys.append('_'.join(parts[0:-3]))
                 var_names.append('_'.join(parts[-3:]))
-        idkeys = list(set(idkeys))
-        var_names = set(var_names)
+        idkeys = sorted(list(set(idkeys)))
+        var_names = sorted(list(set(var_names)))
         print(f"Found {len(idkeys)} unique idkeys and {len(var_names)} unique variable names {var_names}.")
-        var_names = list(var_names)
-        
+
         samples = []
         val_flag = []
         sample_idkey = []
@@ -99,13 +100,21 @@ class SpeechBCIDataSet_3D(Dataset):
                 tmp_val_flag = True
             else:
                 tmp_val_flag = False
-            for islice in range(working_array.shape[1] - depth + 1):
-                tmp = working_array[:, islice:islice+depth, :, :]
+
+                #
+                #   Generate samples from the working_array.  A sample consists of
+                #   "depth" number of frames.
+                #
+            islice = 0
+            for iframe_start in range(0, working_array.shape[1] - depth + 1, depth_step_size):
+                tmp = working_array[:, iframe_start:(iframe_start+depth):1, :, :]
                 samples.append(tmp) # CxTxHxW
                 val_flag.append(tmp_val_flag)
                 sample_idkey.append(idkey)
                 embed_index.append(None)
                 slice_id.append(islice)
+                islice += 1
+        samples = np.array(samples)
 
         print(f"Generated {len(samples)} samples including {sum(val_flag)} for validation.")
         return samples, val_flag, sample_idkey, embed_index, slice_id
