@@ -7,6 +7,10 @@ The purpose of this repo is to explore an open-source data set comprised of elec
 
 Skills applied: Python, PyTorch, CNN, VQ-VAE, CUDA/GPU, AWS, Visual Studio Code, GitHub Co-Pilot, Computer Vision.
 
+Note: This repo reflects work in progress.  So, like a lab bench, there could be items scattered here and there.
+At any given moment things may or may not be fully working.  Once everything settles down, we'll create a prod/ folder
+to distinguish stable working code.
+
 ## Description
 
 The following set of slides describes this project.
