@@ -15,6 +15,11 @@ Functions:
     Then open a browser tab to http://localhost:6006/
 """
 
+#
+# 14March2025 - actively working.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 import sys
 sys.path.append("./")
 

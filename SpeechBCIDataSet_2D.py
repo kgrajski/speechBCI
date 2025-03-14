@@ -14,6 +14,11 @@ Usage example:
         # process data
 """
 
+#
+# 14March2025 - not actively working, but a decent initial reference as it focused on 2D.  We want 3D.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 import numpy as np
 import os
 import pandas as pd

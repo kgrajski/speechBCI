@@ -17,6 +17,11 @@ Usage example:
     fig.show()
 """
 
+#
+# 14March2025 - Stable.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 import numpy as np
 import os
 import pandas as pd

@@ -12,6 +12,11 @@ Usage example:
     sentence.load("/path/to/output/session1_1_1_example.csv")
 """
 
+#
+# 14March2025 - Stable.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 import os
 
 class Sentence:

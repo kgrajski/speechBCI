@@ -6,6 +6,10 @@ from tqdm import tqdm
 import evaluate
 from jiwer import wer
 
+#
+# 14March - actively working this code.
+#
+
 class VQVAEProjector(nn.Module):
     """
     Projects VQ-VAE embeddings (256-dim) to the LLM embedding space.

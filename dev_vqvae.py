@@ -18,6 +18,10 @@ Usage example:
     $ python dev_vqvae.py
 """
 
+#
+# 14March - NOT actively working this code.
+#
+
 import sys
 sys.path.append("./")
 

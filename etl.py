@@ -13,6 +13,10 @@ Usage example:
     $ python etl.py
 """
 
+#
+# 14March - stable for now.
+#
+
 import itertools
 import numpy as np
 import os

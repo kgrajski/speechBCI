@@ -23,6 +23,12 @@ from ray import tune
 from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D  # Ensure this import is correct
 from Vqvae_Simple3D import VQVAE
 
+#
+# 14March2025 - not actively working.
+# May need to be revised to work with redefined Vqvae_Simpl3D.py. But a decent reference.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 def count_parameters(model):
     """
     Returns the total number of parameters in the model.

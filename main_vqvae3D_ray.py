@@ -13,6 +13,11 @@ Functions:
     Then open a browser tab to http://localhost:6006/
 """
 
+#
+# 14March2025 - actively working.  May need to be depcrated or at least carefully reviewed
+# before applying since have redone VQVAE and other modules.  It is a good reference though.
+#
+
 import sys
 sys.path.append("./")
 

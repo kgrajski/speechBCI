@@ -11,6 +11,12 @@ Functions:
     train(loader, model, optimizer, device): Trains the model for one epoch.
     test(loader, model, device): Tests the model.
 """
+
+#
+# 14March2025 - actively working.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 import numpy as np
 import os
 import torch

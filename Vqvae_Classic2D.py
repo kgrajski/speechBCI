@@ -119,6 +119,13 @@ quantized independently. In otherwords, the channels are used as the space
 in which to quantize. All other dimensions will be flattened and be seen as
 different examples to quantize, `16384` in this case.
 """
+
+#
+# 14March2025 - not actively working.
+# May need to be reviewed and updated in light of the Vqvae_Simple3D.py updates.  We want 3D stuff anyway.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 class VectorQuantizer(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, commitment_cost):
         super(VectorQuantizer, self).__init__()

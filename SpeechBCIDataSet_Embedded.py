@@ -15,6 +15,12 @@ Usage example:
     for data in dataloader:
         # process data
 """
+
+#
+# 14March2025 - actively working.
+# Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
+#
+
 import collections
 import numpy as np
 import os
