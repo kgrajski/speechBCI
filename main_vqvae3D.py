@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_Simple_3D"
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/<exp_name>"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -55,8 +55,10 @@ def main():
     embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
     model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
     model_dir = os.path.join(model_dir, exp_name)
+    os.makedirs(model_dir, exist_ok=True)
     tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
+    os.makedirs(tensorboard_dir, exist_ok=True)
     
     num_epochs = 10
     
@@ -65,8 +67,8 @@ def main():
     
     learning_rate = 1e-3
     
-    training = True
-    encoding = False
+    training = False
+    encoding = True
     
     test_prop = 0.2
     train_prop = 1 - test_prop

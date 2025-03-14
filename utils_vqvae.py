@@ -68,20 +68,20 @@ def embed_studydata(model, study_dataset, device, embed_dir):
     vq_codes = []
         # For each sample idkey, embed the samples, add positional encoding,
         # and save the embeddings.
-    for idkey in sample_idkeys:
+    for idkey in tqdm(sample_idkeys, desc="Processing idkeys"):
         indices = [i for i in range(len(study_dataset)) if study_dataset.sample_idkey[i] == idkey]
         indices = sorted(indices) # Ensure the indices are in order
             # Get the data for the sample idkey
         subset = torch.utils.data.Subset(study_dataset, indices)
         dataloader = DataLoader(subset, batch_size=len(indices), shuffle=False)
         
-        for data in dataloader:
-            data = data.to(device)
-            z = model._encoder(data)
-            z = model._pre_vq_conv(z)
-            _, _, _, embeddings = model._vq_vae(z)
+        data = next(iter(dataloader)).to(device)
+        data = data.to(device)
+        z = model._encoder(data)
+        z = model._pre_vq(z)
+        _, _, _, embeddings = model._vq_vae(z)
             
-            # Store the embeddings for the sample idkey
+            # Store the embeddings for the sample idkey.  For future stats.
         vq_codes.append([torch.argmax(embeddings, dim=1).cpu().numpy()])
 
             # Determine the subdirectory based on val_flag
@@ -100,7 +100,8 @@ def embed_studydata(model, study_dataset, device, embed_dir):
         
         if len(indices) > max_series_len:
             max_series_len = len(indices)
-        print(f"For idkey {idkey} of length {len(indices)} and data {data.shape}, saved embeddings {embeddings.shape}.")
+        #print(f"For idkey {idkey} of length {len(indices)} and data {data.shape}, saved embeddings {embeddings.shape}.")
+    
     print(f"Maximum series length: {max_series_len}")
     
         # Flatten vq_codees and generate a histogram of the indices using plotly express and save
