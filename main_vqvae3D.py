@@ -58,25 +58,11 @@ def main():
     tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     
-    num_epochs = 3
+    num_epochs = 10
     
-    encoder_depth = 16 # How many frames in a sample.
-    depth_step_size = 1 # The stride when making samples from the raw input data.
-    encoder_in_channels = 2
-    encoder_out_channels = 64
+    encoder_depth = 8 # Recall convention: B,C,D,H,W; 8 is the depth of the encoder
+    depth_step_size = 2 # The stride when making samples from the raw input data.
     
-    # Recall convention for Conv3D: N x C x D x H x W
-    kernel_size = 4
-    stride = 2
-    padding = 1
-    
-    num_resid_layers = 2
-    num_resid_channels = 32
-    
-    embedding_dim = 64 # Note: an conv layer takes encoder_out_channels to embedding_dim
-    num_embeddings = 64
-    commitment_cost = 0.25
-    decay = 0.99
     learning_rate = 1e-3
     
     training = True
@@ -84,7 +70,7 @@ def main():
     
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 256
+    batch_size = 512
     
     #
     # Per Willett, et al. competition data, the last block in each session
@@ -105,9 +91,7 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = VQVAE(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
-                  num_resid_layers, num_resid_channels,
-                  num_embeddings, embedding_dim, commitment_cost, decay).to(device)
+    model = VQVAE().to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
     
     if training:

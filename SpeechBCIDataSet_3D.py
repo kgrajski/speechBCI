@@ -71,7 +71,7 @@ class SpeechBCIDataSet_3D(Dataset):
                 - list: List of boolean flags indicating validation samples.
         """
         basefile_names = sorted([f.split('.')[0] for f in os.listdir(etl_dir) if f.endswith('.csv')])
-        basefile_names = basefile_names[:11930]
+        #basefile_names = basefile_names[:100]
         idkeys = []
         var_names = []
         for basefile in basefile_names:

@@ -152,7 +152,10 @@ def train(loader, model, optimizer, device):
         tuple: Average reconstruction loss, VQ loss, and perplexity.
     """
     loop = tqdm(loader, leave=True, position=0)
-    data_recon_avg, vq_loss_avg, perplexity_avg = 0, 0, 0
+    data_recon_avg = []
+    vq_loss_avg = []
+    perplexity_avg = []
+    error_sig = []
     model.train()
     for data in loop:
         data = data.to(device)
@@ -163,14 +166,14 @@ def train(loader, model, optimizer, device):
         loss.backward()
         optimizer.step()
         
-        data_recon_avg += recon_error
-        vq_loss_avg += vq_loss
-        perplexity_avg += perplexity
-    
-    data_recon_avg /= len(loader)
-    vq_loss_avg /= len(loader)
-    perplexity_avg /= len(loader)
-    
+        data_recon_avg.append(recon_error.item())
+        vq_loss_avg.append(vq_loss.item())
+        perplexity_avg.append(perplexity.item())
+
+    data_recon_avg = np.mean(data_recon_avg)
+    vq_loss_avg = np.mean(vq_loss_avg)
+    perplexity_avg = np.mean(perplexity_avg)
+        
     return data_recon_avg, vq_loss_avg, perplexity_avg
         
 def test(loader, model, device):
@@ -268,9 +271,9 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
 
         model.eval()
         valid_originals = next(iter(val_dl)).to(device)
-        vq_output_eval = model._pre_vq_conv(model._encoder(valid_originals))
+        vq_output_eval = model._pre_vq(model._encoder(valid_originals))
         _, valid_quantize, _, _ = model._vq_vae(vq_output_eval)
-        valid_reconstructions = model._decoder(valid_quantize)
+        valid_reconstructions = model._decoder(model._post_vq(valid_quantize))
 
         if len(valid_originals.shape) == 4:
             img_grid = make_grid(valid_originals, nrow=16, scale_each=True)
