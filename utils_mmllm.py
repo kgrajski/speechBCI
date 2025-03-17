@@ -124,7 +124,8 @@ def test(loader, model, device):
     return data_recon_avg, vq_loss_avg, perplexity_avg
 
 def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
-            model_dir=None, show_plots=True, tensorboard_dir=None):
+            model_dir=None, tensorboard_dir=None):
+    
     """
     Runs the experiment, including training, testing, validation, and visualization.
 
@@ -175,35 +176,6 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
 
     if model_dir is not None:
         torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_final" + ".pt"))
-        
-    if show_plots:
-        proj = umap.UMAP(n_neighbors=3, min_dist=0.1,
-                    metric="cosine").fit_transform(model._vq_vae._embedding.weight.data.cpu())
-        
-        fig, ax = plt.subplots()
-        ax.scatter(proj[:,0], proj[:,1])
-        ax.set_title("Embedding Space Representation")
-        writer.add_figure("Embedding Plot", fig, global_step=0)
-
-        model.eval()
-        valid_originals = next(iter(val_dl)).to(device)
-        vq_output_eval = model._pre_vq_conv(model._encoder(valid_originals))
-        _, valid_quantize, _, _ = model._vq_vae(vq_output_eval)
-        valid_reconstructions = model._decoder(valid_quantize)
-
-        if len(valid_originals.shape) == 4:
-            img_grid = make_grid(valid_originals, nrow=16, scale_each=True)
-        else:
-            img_grid = make_grid(valid_originals[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
-        writer.add_image("Originals", img_grid)
-        
-        if len(valid_reconstructions.shape) == 4:
-            img_grid = make_grid(valid_reconstructions, nrow=16, scale_each=True)
-        else:
-            img_grid = make_grid(valid_reconstructions[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
-        writer.add_image("Reconstructions", img_grid)
-        
-        writer.add_graph(model, valid_originals)
 
     writer.close()
     

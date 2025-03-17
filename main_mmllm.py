@@ -53,13 +53,21 @@ def main():
     torch.manual_seed(torch_seed)
     
     exp_name = "MM_LLM"
+    model_exp_name = "VQVAE_Simple_3D"
     
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
+    
     model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
-    model_dir = os.path.join(model_dir, exp_name)
+    model_dir = os.path.join(model_dir, model_exp_name)
+    
+    mmllm_model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
+    mmllm_model_dir = os.path.join(model_dir, exp_name)
+    os.makedirs(mmllm_model_dir, exist_ok=True)
+    
     tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
+    os.makedirs(tensorboard_dir, exist_ok=True)
     
     num_epochs = 100
     learning_rate = 1e-3
@@ -101,12 +109,14 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = None
+    model = VQVAE()
+    model.load_state_dict(torch.load(os.path.join(model_dir, model_exp_name + "_final" + ".pt")))
+    print(model)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
     
     if training:
-        run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=num_epochs,
-                model_dir=model_dir, show_plots=True, tensorboard_dir=tensorboard_dir)
+        run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device,
+                num_epochs=num_epochs, model_dir=mmllm_model_dir, tensorboard_dir=tensorboard_dir)
 
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")

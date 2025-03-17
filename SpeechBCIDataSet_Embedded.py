@@ -25,6 +25,8 @@ import collections
 import numpy as np
 import os
 import string
+import plotly.express as px
+import pandas as pd
 from tabulate import tabulate
 import torch
 from torch.utils.data import Dataset
@@ -262,3 +264,109 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
         print("\nTop 20 Unique Test Words:")
         print(tabulate(label_stats['top_20_unique_test_words'], headers=['Word', 'Count'], tablefmt='grid'))
+
+    def visualize_word_frequencies(self, n_words=50, split='all'):
+        """
+        Visualize word frequencies using plotly express.
+        
+        Args:
+            n_words (int): Number of top words to visualize
+            split (str): Which data split to visualize ('train', 'test', or 'all')
+        
+        Returns:
+            plotly.graph_objects.Figure: Histogram figure of word frequencies
+        """
+        if split == 'train':
+            labels = [label for label, flag in zip(self.labels, self.val_flag) if not flag]
+        elif split == 'test':
+            labels = [label for label, flag in zip(self.labels, self.val_flag) if flag]
+        else:
+            labels = self.labels
+        
+        # Clean and tokenize
+        translator = str.maketrans('', '', string.punctuation)
+        cleaned_labels = [label.translate(translator).lower() for label in labels]
+        words = [word for label in cleaned_labels for word in label.split()]
+        
+        # Count word frequencies
+        word_counts = collections.Counter(words)
+        top_words = word_counts.most_common(n_words)
+        
+        # Create a DataFrame for plotting
+        df = pd.DataFrame(top_words, columns=['Word', 'Frequency'])
+        
+        # Create the histogram
+        fig = px.histogram(df, x='Word', y='Frequency', title=f'Top {n_words} Word Frequencies ({split})')
+        fig.update_layout(xaxis_title='Word', yaxis_title='Frequency', xaxis={'categoryorder': 'total descending'})
+        
+        return fig
+    
+    def visualize_sentence_lengths(self):
+        """
+        Visualize distribution of sentence lengths using plotly express.
+        
+        Returns:
+            plotly.graph_objects.Figure: Histogram figure of sentence lengths
+        """
+        # Calculate sentence lengths
+        train_lengths = [len(label.split()) for label, flag in zip(self.labels, self.val_flag) if not flag]
+        test_lengths = [len(label.split()) for label, flag in zip(self.labels, self.val_flag) if flag]
+        
+        # Create a DataFrame for plotting
+        df = pd.DataFrame({
+            'Length': train_lengths + test_lengths,
+            'Split': ['Train'] * len(train_lengths) + ['Test'] * len(test_lengths)
+        })
+        
+        # Create the histogram
+        fig = px.histogram(
+            df, x='Length', color='Split', 
+            marginal='box',
+            title='Distribution of Sentence Lengths',
+            nbins=30
+        )
+        fig.update_layout(xaxis_title='Sentence Length (words)', yaxis_title='Count')
+        
+        return fig
+    
+    def visualize_embedding_stats(self):
+        """
+        Visualize statistics of the embeddings using plotly express.
+        
+        Returns:
+            dict: Dictionary containing various plotly figures
+        """
+        figures = {}
+        
+        # Get embedding dimensions for a few samples
+        sample_embeddings = [self.samples[i] for i in range(min(10, len(self.samples)))]
+        
+        # Plot embedding lengths
+        lengths = [len(emb) for emb in self.samples]
+        df_lengths = pd.DataFrame({'Sequence Length': lengths})
+        
+        figures['length_dist'] = px.histogram(
+            df_lengths, x='Sequence Length',
+            title='Distribution of Embedding Sequence Lengths',
+            nbins=30
+        )
+        
+        # Plot embedding means and std devs
+        means = [torch.mean(torch.tensor(emb)).item() for emb in self.samples]
+        stds = [torch.std(torch.tensor(emb)).item() for emb in self.samples]
+        
+        df_stats = pd.DataFrame({
+            'Mean': means,
+            'StdDev': stds
+        })
+        
+        figures['means'] = px.histogram(df_stats, x='Mean', title='Distribution of Embedding Means')
+        figures['stds'] = px.histogram(df_stats, x='StdDev', title='Distribution of Embedding Standard Deviations')
+        
+        # Scatter plot of means vs stds
+        figures['means_vs_stds'] = px.scatter(
+            df_stats, x='Mean', y='StdDev',
+            title='Mean vs Standard Deviation of Embeddings'
+        )
+        
+        return figures
