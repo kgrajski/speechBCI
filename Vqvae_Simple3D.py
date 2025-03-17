@@ -389,7 +389,10 @@ class VQVAE(nn.Module):
         super(VQVAE, self).__init__()
         self._encoder = Encoder()
         self._pre_vq = PreVQLayer()
+        
+            # Note that for now are using plain vanilla VectorQuantizer
         self._vq_vae = VectorQuantizer()
+        
         self._post_vq = PostVQLayer()
         self._decoder = Decoder()
 

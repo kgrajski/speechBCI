@@ -22,11 +22,10 @@ Usage example:
 #
 
 import collections
+import math
 import numpy as np
 import os
 import string
-import plotly.express as px
-import pandas as pd
 from tabulate import tabulate
 import torch
 from torch.utils.data import Dataset
@@ -48,8 +47,10 @@ class SpeechBCIDataSet_Embedded(Dataset):
         target_transform (callable, optional): Optional transform to be applied on the target.
     """
     
-    def __init__(self, label_dir, embeddings_dir, transform=None, target_transform=None):
-        self.samples, self.labels, self.val_flag = self.gen_dataset(label_dir, embeddings_dir)
+    def __init__(self, label_dir, embeddings_dir, max_input_seq_len, padding_vector,
+                 transform=None, target_transform=None):
+        self.samples, self.attention_masks, self.labels, self.val_flag = self.gen_dataset(label_dir, \
+            embeddings_dir, max_input_seq_len, padding_vector)
         self.transform = transform
         self.target_transform = target_transform
 
@@ -85,13 +86,15 @@ class SpeechBCIDataSet_Embedded(Dataset):
             val_flag.append(val_flag_value)
         return samples, labels, val_flag
 
-    def gen_dataset(self, label_dir, embeddings_dir):
+    def gen_dataset(self, label_dir, embeddings_dir, max_input_seq_len, padding_vector):
         """
         Generate the dataset by reading label and embedding files from the specified directories.
 
         Args:
             label_dir (str): Directory containing the label files.
             embeddings_dir (str): Directory containing the embedded trial data files.
+            max_input_seq_len (int): Maximum input sequence length.
+            padding_vector (torch.Tensor): Padding vector to use for samples.
 
         Returns:
             tuple: A tuple containing:
@@ -103,17 +106,62 @@ class SpeechBCIDataSet_Embedded(Dataset):
         labels = []
         val_flag = []
         
+            # Get trial data for training and testing sets
+            # The samples list is a list of T x E arrays, where T is input sequence
+            # length and E is the embedding dimension.
+
         for sub_dir in ['train', 'test']:
+            
+                # Locate the trial data and labels
             trial_dir = os.path.join(embeddings_dir, sub_dir)
             trial_list = [f.split('.')[0] for f in os.listdir(trial_dir) if f.endswith('.pt')]
             val_flag_value = sub_dir == 'test'
+            
+                # Get the trial data and labels
             tmp_samples, tmp_labels, tmp_val_flag = self._get_trial_data(trial_dir, label_dir, trial_list, val_flag_value)
             samples.extend(tmp_samples)
             labels.extend(tmp_labels)
             val_flag.extend(tmp_val_flag)
             print(f"Generated {len(tmp_samples)} samples for {sub_dir}.")
             
-        return samples, labels, val_flag
+            #
+            # Note: samples is a list of trial tensors, one T x E tensor per trial:
+            #   T is input seqquence length
+            #   E is the embedding dimension
+            # For each trial create a new sample tensor that is max_input_seq_len x E.
+            #       a.  Pad as necessary using padding_vector.
+            #               We've made the choice here that the padding_vector is the average
+            #               of the codebook vectors passed in as an argument.
+            #       b.  Generate an attention mask on the original T non-padded values.
+            #       c.  Generate a positional encoding on the original T non-padded values.
+            #
+            
+                # Process each sample per above.
+            new_padded_samples = []
+            attention_masks = []
+            for sample in samples:
+                
+                seq_len = sample.shape[0]
+                emb_dim = sample.shape[1]
+                if seq_len > max_input_seq_len:
+                    print(f"Warning: sample len {seq_len} > max_input_seq_len {max_input_seq_len}.")
+                    seq_len = max_input_seq_len
+                    
+                    # Create new padded tensor
+                padded_sample = padding_vector.repeat(max_input_seq_len, 1)
+                
+                    # copy original data (or truncate)
+                copy_len = min(seq_len, max_input_seq_len)
+                padded_sample[:copy_len] = sample[:copy_len]
+                
+                        # Create attention mask (1 for real data, 0 for padding)
+                mask = torch.zeros(max_input_seq_len, dtype=torch.bool)
+                mask[:copy_len] = 1
+                
+                attention_masks.append(mask)
+                new_padded_samples.append(padded_sample)
+            
+        return new_padded_samples, attention_masks, labels, val_flag
     
     def __getitem__(self, idx):
         """
@@ -129,7 +177,9 @@ class SpeechBCIDataSet_Embedded(Dataset):
         """
         x = torch.tensor(self.samples[idx], dtype=torch.float32)
         y = self.labels[idx]
-        return x, y
+        attention_mask = self.attention_masks[idx]
+
+        return x, y, attention_mask
 
     @staticmethod
     def _get_label_statistics(labels):
@@ -264,109 +314,3 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
         print("\nTop 20 Unique Test Words:")
         print(tabulate(label_stats['top_20_unique_test_words'], headers=['Word', 'Count'], tablefmt='grid'))
-
-    def visualize_word_frequencies(self, n_words=50, split='all'):
-        """
-        Visualize word frequencies using plotly express.
-        
-        Args:
-            n_words (int): Number of top words to visualize
-            split (str): Which data split to visualize ('train', 'test', or 'all')
-        
-        Returns:
-            plotly.graph_objects.Figure: Histogram figure of word frequencies
-        """
-        if split == 'train':
-            labels = [label for label, flag in zip(self.labels, self.val_flag) if not flag]
-        elif split == 'test':
-            labels = [label for label, flag in zip(self.labels, self.val_flag) if flag]
-        else:
-            labels = self.labels
-        
-        # Clean and tokenize
-        translator = str.maketrans('', '', string.punctuation)
-        cleaned_labels = [label.translate(translator).lower() for label in labels]
-        words = [word for label in cleaned_labels for word in label.split()]
-        
-        # Count word frequencies
-        word_counts = collections.Counter(words)
-        top_words = word_counts.most_common(n_words)
-        
-        # Create a DataFrame for plotting
-        df = pd.DataFrame(top_words, columns=['Word', 'Frequency'])
-        
-        # Create the histogram
-        fig = px.histogram(df, x='Word', y='Frequency', title=f'Top {n_words} Word Frequencies ({split})')
-        fig.update_layout(xaxis_title='Word', yaxis_title='Frequency', xaxis={'categoryorder': 'total descending'})
-        
-        return fig
-    
-    def visualize_sentence_lengths(self):
-        """
-        Visualize distribution of sentence lengths using plotly express.
-        
-        Returns:
-            plotly.graph_objects.Figure: Histogram figure of sentence lengths
-        """
-        # Calculate sentence lengths
-        train_lengths = [len(label.split()) for label, flag in zip(self.labels, self.val_flag) if not flag]
-        test_lengths = [len(label.split()) for label, flag in zip(self.labels, self.val_flag) if flag]
-        
-        # Create a DataFrame for plotting
-        df = pd.DataFrame({
-            'Length': train_lengths + test_lengths,
-            'Split': ['Train'] * len(train_lengths) + ['Test'] * len(test_lengths)
-        })
-        
-        # Create the histogram
-        fig = px.histogram(
-            df, x='Length', color='Split', 
-            marginal='box',
-            title='Distribution of Sentence Lengths',
-            nbins=30
-        )
-        fig.update_layout(xaxis_title='Sentence Length (words)', yaxis_title='Count')
-        
-        return fig
-    
-    def visualize_embedding_stats(self):
-        """
-        Visualize statistics of the embeddings using plotly express.
-        
-        Returns:
-            dict: Dictionary containing various plotly figures
-        """
-        figures = {}
-        
-        # Get embedding dimensions for a few samples
-        sample_embeddings = [self.samples[i] for i in range(min(10, len(self.samples)))]
-        
-        # Plot embedding lengths
-        lengths = [len(emb) for emb in self.samples]
-        df_lengths = pd.DataFrame({'Sequence Length': lengths})
-        
-        figures['length_dist'] = px.histogram(
-            df_lengths, x='Sequence Length',
-            title='Distribution of Embedding Sequence Lengths',
-            nbins=30
-        )
-        
-        # Plot embedding means and std devs
-        means = [torch.mean(torch.tensor(emb)).item() for emb in self.samples]
-        stds = [torch.std(torch.tensor(emb)).item() for emb in self.samples]
-        
-        df_stats = pd.DataFrame({
-            'Mean': means,
-            'StdDev': stds
-        })
-        
-        figures['means'] = px.histogram(df_stats, x='Mean', title='Distribution of Embedding Means')
-        figures['stds'] = px.histogram(df_stats, x='StdDev', title='Distribution of Embedding Standard Deviations')
-        
-        # Scatter plot of means vs stds
-        figures['means_vs_stds'] = px.scatter(
-            df_stats, x='Mean', y='StdDev',
-            title='Mean vs Standard Deviation of Embeddings'
-        )
-        
-        return figures

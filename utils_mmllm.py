@@ -1,15 +1,4 @@
 """
-This module defines utility functions for running VQ_VAE experiments with PyTorch models.
-It includes functions for counting parameters, training, testing, and running experiments.
-
-Functions:
-    count_parameters(model): Returns the total number of parameters in the model.
-    count_trainable_parameters(model, show_details=False): Returns the number of trainable parameters in the model.
-    run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
-            training=True, model_dir=None, show_plots=True): Runs the experiment, including training,
-            testing, validation, and visualization.
-    train(loader, model, optimizer, device): Trains the model for one epoch.
-    test(loader, model, device): Tests the model.
 """
 
 #
@@ -28,34 +17,32 @@ import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
-def count_parameters(model):
+def get_vqvae_codebook_average(model):
     """
-    Returns the total number of parameters in the model.
-
+    Calculate the average of all embedding vectors in the VQ-VAE codebook.
+    
+    This function extracts the codebook embeddings from a trained VQ-VAE model
+    and computes their mean. This can be useful for padding or initialization
+    purposes when using the codebook representations.
+    
     Args:
-        model (torch.nn.Module): The model to count parameters for.
-
+        model (VQVAE): A trained VQ-VAE model instance
+        
     Returns:
-        int: Total number of parameters.
+        torch.Tensor: The average embedding vector with shape [embedding_dim]
     """
-    return sum(p.numel() for p in model.parameters())
-
-def count_trainable_parameters(model, show_details=False):
-    """
-    Returns the number of trainable parameters in the model.
-
-    Args:
-        model (torch.nn.Module): The model to count trainable parameters for.
-        show_details (bool, optional): Whether to print details of each parameter. Defaults to False.
-
-    Returns:
-        int: Number of trainable parameters.
-    """
-    if show_details:
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                print(name, param.numel())
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    # Get the vector quantizer (either standard or EMA)
+    vq = model._vq_vae
+    
+    # Extract the embedding weights (codebook vectors)
+    # Shape: [num_embeddings, embedding_dim]
+    codebook = vq._embedding.weight.data
+    
+    # Calculate the average across all codebook vectors
+    # Shape: [embedding_dim]
+    avg_vector = torch.mean(codebook, dim=0)
+    
+    return avg_vector
 
 def train(loader, model, optimizer, device):
     """

@@ -31,7 +31,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
-from utils_mmllm import run_exp
+from utils_mmllm import get_vqvae_codebook_average, run_exp
+from Vqvae_Simple3D import VQVAE
 
 def main():
     """
@@ -69,6 +70,7 @@ def main():
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     os.makedirs(tensorboard_dir, exist_ok=True)
     
+    max_input_seq_len = 512
     num_epochs = 100
     learning_rate = 1e-3
     training = False
@@ -78,13 +80,19 @@ def main():
     batch_size = 256
     
     #
+    # Need model info to set up the optimizer and prep for transformer.
+    #
+    model = VQVAE()
+    model.load_state_dict(torch.load(os.path.join(model_dir, model_exp_name + "_final" + ".pt")))
+    padding_vector = get_vqvae_codebook_average(model)
+    #
     # Per Willett, et al. competition data, the last block in each session
     # should be used as the test set.  Here, we'll call that set the validation set
     # and split the remaining data into training and validation sets.
     # Note: in the official competition, there is a distinct validation (holdout) set.
     #
     #torch.autograd.set_detect_anomaly(True)
-    study_dataset = SpeechBCIDataSet_Embedded(etl_dir, embed_dir)
+    study_dataset = SpeechBCIDataSet_Embedded(etl_dir, embed_dir, max_input_seq_len, padding_vector)
     
     #
     # Recall that we are using competition data.  That study defines the last block in
@@ -109,12 +117,8 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = VQVAE()
-    model.load_state_dict(torch.load(os.path.join(model_dir, model_exp_name + "_final" + ".pt")))
-    print(model)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
-    
     if training:
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
         run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device,
                 num_epochs=num_epochs, model_dir=mmllm_model_dir, tensorboard_dir=tensorboard_dir)
 

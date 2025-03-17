@@ -33,7 +33,8 @@ from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
 from Vqvae_Simple3D import VQVAE
-from utils_vqvae import run_exp, embed_studydata
+from utils_vqvae import run_exp
+from utils_embedding import embed_studydata
 
 def main():
     """
