@@ -13,15 +13,18 @@ to distinguish stable working code.
 
 ## Description
 
-The following set of slides describes this project.
+The following set of slides describes this project at its outset.  As project progresses we will update.  Or if results merit such, we'll write a paper.
 [Speech Decoding Pilot Study (Kamil Grajski 28Feb2025).pdf](https://github.com/user-attachments/files/19057861/Speech.Decoding.Pilot.Study.Kamil.Grajski.28Feb2025.pdf)
 
 This animation is from a single trial during which the subject "spoke" a sentence.
 Each point in the grid corresponds to an electrode.  The data is shown as a heat map movie.
-[Example Animation](figs/competitionData/train/t12.2022.05.05_1_0_implot.html)
+You may have to download the file and view it in your browser.
+[Example Animation (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_implot.html)
 
 This image is from the same animation as above, but shown as a time series.
-[Example Time Series](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
+You may have to download the file and view it in your browser.
+[Example Time Series (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
+[Example Time Series (PNG)](figs/competitionData/train/ArrayTimeSeriesExample.png)
 
 Note: If you get the message that git cannot display such large html then download the figs folder and display locally.
 
