@@ -36,12 +36,13 @@ Assuming that one has gained access to the dataset, there are two stages to usin
      The script leverages GPU if available and puts results to TensorBoard
      This was used for 2D exploration.
 * The VQ-VAE 3D stage is implemented in the **main_vqvae3D.py**.  Have refactored code to push the functions needed to run experiments to **utils_vqvae.p**y.
-  [Exanmple_Plot](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
+
 ## Why The Excitement to Proceed?
 The plot below shows the time series of trained VQ-VAE codebook indexes for a sample sentence from the speechBCI dataset.
 If the idea to use VQ-VAE was bogus, one might expect to see a random sequence of indexes.
 While the indexes have no intrinsic meaning, we are delighted to see what look like short segments of repeated values.
 They appear to be of the duration one likes to see for a neural speech coding.  Next step is to train some LLMs!
+[Example_Plot](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
 
 
 ### Dependencies
