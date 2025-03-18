@@ -13,6 +13,8 @@ Functions:
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
         tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_Simple_3D"
     Then open a browser tab to http://localhost:6006/
+    
+    Reminder: nvidia-smi -l 5  # Updates every 5 seconds
 """
 
 #
@@ -32,7 +34,7 @@ from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
 from transformers import T5Tokenizer, T5ForConditionalGeneration
-from utils_mmllm import get_vqvae_codebook_average, run_exp, CustomEmbeddingT5
+from utils_mmllm import get_vqvae_codebook_average, run_exp, CustomEmbeddingT5, get_lora_model
 from Vqvae_Simple3D import VQVAE
 
 def main():
@@ -74,12 +76,12 @@ def main():
     embedding_dim = 64 # Later can make this automatic.
     max_seq_len = 512
     num_epochs = 5
-    learning_rate = 1e-3
+    learning_rate = 5e-4
     training = True
     
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 256
+    batch_size = 64
     
     #
     # Need model info to set up the optimizer and prep for transformer, such as
@@ -123,14 +125,30 @@ def main():
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     if training:
-        t5_base = T5ForConditionalGeneration.from_pretrained("t5-small") # Start small
-        mm_llm = CustomEmbeddingT5(t5_base, embedding_dim=embedding_dim)
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        # Load the base T5 model
+        t5_model_name = "t5-small"
+        t5_model = T5ForConditionalGeneration.from_pretrained(t5_model_name)
+        
+        # Apply LoRA to T5
+        lora_model = get_lora_model(
+            t5_model, 
+            r=8,               # LoRA rank - smaller = fewer parameters
+            alpha=32,          # LoRA alpha scaling factor
+            dropout=0.1        # LoRA dropout rate
+        )
+        
+        # Create custom embedding adapter with LoRA model
+        mm_llm = CustomEmbeddingT5(lora_model, embedding_dim=embedding_dim)
+        
+        # Print parameter efficiency statistics
+        mm_llm.print_trainable_parameters()
+        
+        tokenizer = T5Tokenizer.from_pretrained(t5_model_name,legacy=True)
 
-            # Create optimizer
-        optimizer = torch.optim.AdamW(mm_llm.parameters(), lr=learning_rate)
+        # Create optimizer - only trainable parameters will be updated
+        optimizer = torch.optim.AdamW(mm_llm.parameters(), lr=learning_rate)  # Using a higher LR for LoRA
 
-            # Train and evaluate model
+        # Train and evaluate model
         trained_model = run_exp(
             exp_name=exp_name,
             train_dl=train_dl,
@@ -141,9 +159,9 @@ def main():
             tokenizer=tokenizer,
             device=device,
             num_epochs=num_epochs,
-            learning_rate=learning_rate,
             model_dir=model_dir,
-            tensorboard_dir=tensorboard_dir
+            tensorboard_dir=tensorboard_dir,
+            gradient_accumulation_steps=4,  # Simulate larger batches
         )
         
         print(trained_model)

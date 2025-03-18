@@ -36,10 +36,10 @@ class SpeechBCIDataSet_Embedded(Dataset):
         return len(self.samples)
         
     def __getitem__(self, idx):
-        x = torch.tensor(self.samples[idx], dtype=torch.float32)
-        attention_mask = torch.tensor(self.attention_masks[idx], dtype=torch.bool)
-        y_ids = torch.tensor(self.label_ids[idx])
-        y_mask = torch.tensor(self.label_masks[idx], dtype=torch.bool) # Redundant; OK for now
+        x = self.samples[idx]
+        attention_mask = self.attention_masks[idx]
+        y_ids = self.label_ids[idx]
+        y_mask = self.label_masks[idx]
         return x, attention_mask, y_ids, y_mask
     
         #
@@ -98,8 +98,8 @@ class SpeechBCIDataSet_Embedded(Dataset):
             
                 # MVP approach says let this model-specific call sit here for now.
             padded, mask = self._pad_label(label, max_seq_len)
-            padded_label_ids.append(padded)
-            label_attention_masks.append(mask)
+            padded_label_ids.append(padded.squeeze())
+            label_attention_masks.append(mask.squeeze())
             
         return padded_samples, sample_attention_masks, labels, padded_label_ids, label_attention_masks, val_flag
     
