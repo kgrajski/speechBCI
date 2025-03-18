@@ -1,23 +1,5 @@
-"""
-This module defines the SpeechBCIDataSet_Embedded class, a custom PyTorch Dataset
-designed for handling Speech BCI Array Recordings that have gone through ETL and
-VQ-VAE embedding.
-
-Main differences from SpeechBCIDataSet_3D and SpeechBCIDataSet_2D is that the data
-is now embedded in a lower-dimensional space and stored as one file per trial.
-
-Classes:
-    SpeechBCIDataSet_Embedded: A custom PyTorch Dataset for Speech BCI Array Recordings.
-
-Usage example:
-    dataset = SpeechBCIDataSet_Embedded(label_dir="/path/to/labels", embeddings_dir="/path/to/embeddings")
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-    for data in dataloader:
-        # process data
-"""
-
 #
-# 14March2025 - actively working.
+# 18March2025 - actively working.
 # Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
 #
 
@@ -29,51 +11,101 @@ import string
 from tabulate import tabulate
 import torch
 from torch.utils.data import Dataset
+from tqdm import tqdm
 from Sentence import Sentence
+from transformers import T5Tokenizer
 
 class SpeechBCIDataSet_Embedded(Dataset):
-    """
-    PyTorch custom Dataset tuned for Speech BCI Array Recordings.
     
-    We treat each trial as a 3D array: time series of 2D images.
+        # Class-level tokenizer variable - initialized only once
+    _tokenizer = None
     
-    Note:
-        Adhere to the convention of NTCHW.
-
-    Args:
-        label_dir (str): Directory containing the label files.
-        embeddings_dir (str): Directory containing the embedded trial data files.
-        transform (callable, optional): Optional transform to be applied on a sample.
-        target_transform (callable, optional): Optional transform to be applied on the target.
-    """
-    
-    def __init__(self, label_dir, embeddings_dir, max_input_seq_len, padding_vector,
+        #
+        # The required basic methods: __init__, __len__, and __getitem__.
+        #
+    def __init__(self, label_dir, embeddings_dir, max_seq_len, padding_vector,
                  transform=None, target_transform=None):
-        self.samples, self.attention_masks, self.labels, self.val_flag = self.gen_dataset(label_dir, \
-            embeddings_dir, max_input_seq_len, padding_vector)
+        self.samples, self.attention_masks, \
+        self.labels, self.label_ids, self.label_masks, \
+        self.val_flag = self.gen_dataset(label_dir, embeddings_dir, max_seq_len, padding_vector)
+        
         self.transform = transform
         self.target_transform = target_transform
-
+        
     def __len__(self):
         return len(self.samples)
+        
+    def __getitem__(self, idx):
+        x = torch.tensor(self.samples[idx], dtype=torch.float32)
+        attention_mask = torch.tensor(self.attention_masks[idx], dtype=torch.bool)
+        y_ids = torch.tensor(self.label_ids[idx])
+        y_mask = torch.tensor(self.label_masks[idx], dtype=torch.bool) # Redundant; OK for now
+        return x, attention_mask, y_ids, y_mask
+    
+        #
+        # Additional methods to transform embedded data for use in fine-tuning an LLM.
+        # Trying to be LLM-agnostic, but at a certain level that files, such as with
+        # respect to tokenizers and other requirements.
+        #
+        
+    def gen_dataset(self, label_dir, embeddings_dir, max_seq_len, padding_vector):
+
+        samples = []
+        labels = []
+        val_flag = []
+        
+            #
+            # Get embedded trial data for training and testing sets.
+            # Recall that for this dataset, they are prescribed. So we loop over both.
+            #
+        for sub_dir in ['train', 'test']:
+            
+                # Locate the trial embedded data and labels
+            trial_dir = os.path.join(embeddings_dir, sub_dir)
+            trial_list = [f.split('.')[0] for f in os.listdir(trial_dir) if f.endswith('.pt')]
+            val_flag_value = sub_dir == 'test'
+            
+                # Collect all of the trial embedded data and labels
+            tmp_samples, tmp_labels, tmp_val_flag = self._get_trial_data(trial_dir, label_dir, trial_list, val_flag_value)
+            samples.extend(tmp_samples)
+            labels.extend(tmp_labels)
+            val_flag.extend(tmp_val_flag)
+            print(f"Generated {len(tmp_samples)} samples for {sub_dir}.")
+            
+                #
+                # Note: samples is a list of trial tensors, one T x E tensor per trial:
+                #   T is input seqquence length
+                #   E is the embedding dimension
+                # For each trial create a new sample tensor that is max_seq_len x E.
+                #       a.  Pad as necessary using padding_vector.
+                #               We've made the choice here that the padding_vector is the average
+                #               of the codebook vectors passed in as an argument. This keeps
+                #               things very clean where we use ONLY training data - no peeking!
+                #       b.  Generate an attention mask on the original T non-padded values.
+                #       c.  Generate a positional encoding on the original T non-padded values.
+                #
+
+        padded_samples = []
+        sample_attention_masks = []
+        padded_label_ids = []
+        label_attention_masks = []
+        
+        for sample, label in tqdm(zip(samples, labels), desc="Tokenizing Trial Data"):
+            
+            padded, mask = self._pad_sample(sample, max_seq_len, padding_vector)
+            padded_samples.append(padded)
+            sample_attention_masks.append(mask)
+            
+                # MVP approach says let this model-specific call sit here for now.
+            padded, mask = self._pad_label(label, max_seq_len)
+            padded_label_ids.append(padded)
+            label_attention_masks.append(mask)
+            
+        return padded_samples, sample_attention_masks, labels, padded_label_ids, label_attention_masks, val_flag
     
     @staticmethod
     def _get_trial_data(trial_dir, label_dir, trial_list, val_flag_value):
-        """
-        Helper function to get trial data and labels.
 
-        Args:
-            trial_dir (str): Directory containing the trial data files.
-            label_dir (str): Directory containing the label (sentence text) files.
-            trial_list (list): List of trial identifiers.
-            val_flag_value (bool): Flag indicating if the data is from the validation set.
-
-        Returns:
-            tuple: A tuple containing:
-                - list: List of trial data samples.
-                - list: List of trial labels.
-                - list: List of validation set flags.
-        """
         samples = []
         labels = []
         val_flag = []
@@ -85,113 +117,50 @@ class SpeechBCIDataSet_Embedded(Dataset):
             labels.append(text_data.sentence_txt)
             val_flag.append(val_flag_value)
         return samples, labels, val_flag
-
-    def gen_dataset(self, label_dir, embeddings_dir, max_input_seq_len, padding_vector):
-        """
-        Generate the dataset by reading label and embedding files from the specified directories.
-
-        Args:
-            label_dir (str): Directory containing the label files.
-            embeddings_dir (str): Directory containing the embedded trial data files.
-            max_input_seq_len (int): Maximum input sequence length.
-            padding_vector (torch.Tensor): Padding vector to use for samples.
-
-        Returns:
-            tuple: A tuple containing:
-                - list: List of samples.
-                - list: List of labels.
-                - list: List of validation set flags.
-        """
-        samples = []
-        labels = []
-        val_flag = []
-        
-            # Get trial data for training and testing sets
-            # The samples list is a list of T x E arrays, where T is input sequence
-            # length and E is the embedding dimension.
-
-        for sub_dir in ['train', 'test']:
-            
-                # Locate the trial data and labels
-            trial_dir = os.path.join(embeddings_dir, sub_dir)
-            trial_list = [f.split('.')[0] for f in os.listdir(trial_dir) if f.endswith('.pt')]
-            val_flag_value = sub_dir == 'test'
-            
-                # Get the trial data and labels
-            tmp_samples, tmp_labels, tmp_val_flag = self._get_trial_data(trial_dir, label_dir, trial_list, val_flag_value)
-            samples.extend(tmp_samples)
-            labels.extend(tmp_labels)
-            val_flag.extend(tmp_val_flag)
-            print(f"Generated {len(tmp_samples)} samples for {sub_dir}.")
-            
-            #
-            # Note: samples is a list of trial tensors, one T x E tensor per trial:
-            #   T is input seqquence length
-            #   E is the embedding dimension
-            # For each trial create a new sample tensor that is max_input_seq_len x E.
-            #       a.  Pad as necessary using padding_vector.
-            #               We've made the choice here that the padding_vector is the average
-            #               of the codebook vectors passed in as an argument.
-            #       b.  Generate an attention mask on the original T non-padded values.
-            #       c.  Generate a positional encoding on the original T non-padded values.
-            #
-            
-                # Process each sample per above.
-            new_padded_samples = []
-            attention_masks = []
-            for sample in samples:
-                
-                seq_len = sample.shape[0]
-                emb_dim = sample.shape[1]
-                if seq_len > max_input_seq_len:
-                    print(f"Warning: sample len {seq_len} > max_input_seq_len {max_input_seq_len}.")
-                    seq_len = max_input_seq_len
-                    
-                    # Create new padded tensor
-                padded_sample = padding_vector.repeat(max_input_seq_len, 1)
-                
-                    # copy original data (or truncate)
-                copy_len = min(seq_len, max_input_seq_len)
-                padded_sample[:copy_len] = sample[:copy_len]
-                
-                        # Create attention mask (1 for real data, 0 for padding)
-                mask = torch.zeros(max_input_seq_len, dtype=torch.bool)
-                mask[:copy_len] = 1
-                
-                attention_masks.append(mask)
-                new_padded_samples.append(padded_sample)
-            
-        return new_padded_samples, attention_masks, labels, val_flag
     
-    def __getitem__(self, idx):
-        """
-        Get a sample from the dataset.
+    @staticmethod
+    def _pad_sample(sample, max_seq_len, padding_vector):
+        seq_len = sample.shape[0]
+        if seq_len > max_seq_len:
+            print(f"Warning _pad_sample: sample len {seq_len} > max_seq_len {max_seq_len}.")
+            seq_len = max_seq_len
+            
+            # Create new padded tensor
+        padded_sample = padding_vector.repeat(max_seq_len, 1)
+        
+            # copy original data (or truncate)
+        copy_len = min(seq_len, max_seq_len)
+        padded_sample[:copy_len] = sample[:copy_len]
+        
+                # Create attention mask (1 for real data, 0 for padding)
+        mask = torch.zeros(max_seq_len, dtype=torch.bool)
+        mask[:copy_len] = 1
+        
+        return padded_sample, mask
+    
+    @classmethod
+    def _pad_label(cls, labels, max_seq_len):
+        
+            # Initialize tokenizer
+        if cls._tokenizer is None:
+            cls._tokenizer = T5Tokenizer.from_pretrained("t5-base", legacy=True)
+            
+        encoded_labels = cls._tokenizer(labels,
+                                   padding="max_length",
+                                   max_length=max_seq_len,
+                                   truncation=True,
+                                   return_tensors="pt")
 
-        Args:
-            idx (int): Index of the sample to retrieve.
-
-        Returns:
-            tuple: A tuple containing:
-                - torch.Tensor: The sample at the specified index.
-                - str: The label for the sample (sentence text).
-        """
-        x = torch.tensor(self.samples[idx], dtype=torch.float32)
-        y = self.labels[idx]
-        attention_mask = self.attention_masks[idx]
-
-        return x, y, attention_mask
+        return encoded_labels.input_ids, encoded_labels.attention_mask    
+   
+        #
+        # The following methods process the raw label data.  Mainly
+        # used during data exploration phase.
+        #
 
     @staticmethod
     def _get_label_statistics(labels):
-        """
-        Provides basic descriptive statistics for the labels.
 
-        Args:
-            labels (list of str): List of label strings.
-
-        Returns:
-            dict: Dictionary containing various statistics.
-        """
         # Remove punctuation and convert to lowercase
         translator = str.maketrans('', '', string.punctuation)
         cleaned_labels = [label.translate(translator).lower() for label in labels]

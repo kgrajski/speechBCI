@@ -31,7 +31,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
-from utils_mmllm import get_vqvae_codebook_average, run_exp
+from transformers import T5Tokenizer, T5ForConditionalGeneration
+from utils_mmllm import get_vqvae_codebook_average, run_exp, CustomEmbeddingT5
 from Vqvae_Simple3D import VQVAE
 
 def main():
@@ -70,29 +71,33 @@ def main():
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     os.makedirs(tensorboard_dir, exist_ok=True)
     
-    max_input_seq_len = 512
-    num_epochs = 100
+    embedding_dim = 64 # Later can make this automatic.
+    max_seq_len = 512
+    num_epochs = 5
     learning_rate = 1e-3
-    training = False
+    training = True
     
     test_prop = 0.2
     train_prop = 1 - test_prop
     batch_size = 256
     
     #
-    # Need model info to set up the optimizer and prep for transformer.
+    # Need model info to set up the optimizer and prep for transformer, such as
+    # by computing the average codebook vector.  May be model-dependent.
     #
     model = VQVAE()
     model.load_state_dict(torch.load(os.path.join(model_dir, model_exp_name + "_final" + ".pt")))
     padding_vector = get_vqvae_codebook_average(model)
+    
     #
     # Per Willett, et al. competition data, the last block in each session
     # should be used as the test set.  Here, we'll call that set the validation set
     # and split the remaining data into training and validation sets.
     # Note: in the official competition, there is a distinct validation (holdout) set.
+    # In MVP stage, there will be model-dependent methods in SpeechBCIDataSet_Embedded
     #
     #torch.autograd.set_detect_anomaly(True)
-    study_dataset = SpeechBCIDataSet_Embedded(etl_dir, embed_dir, max_input_seq_len, padding_vector)
+    study_dataset = SpeechBCIDataSet_Embedded(etl_dir, embed_dir, max_seq_len, padding_vector)
     
     #
     # Recall that we are using competition data.  That study defines the last block in
@@ -102,9 +107,9 @@ def main():
     # data we'll split into the traditional training and test set.
     # Consequently, it makes sense to have a quick 
     #
-    # Generate some statistics on the words in the training and testing sets.
+    # Generate some statistics on the raw words in the training and testing sets.
     #
-    study_dataset._train_test_label_compare()
+    #study_dataset._train_test_label_compare()
     
     # Now subset the study data as described above.
     train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
@@ -118,10 +123,31 @@ def main():
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     if training:
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
-        run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device,
-                num_epochs=num_epochs, model_dir=mmllm_model_dir, tensorboard_dir=tensorboard_dir)
+        t5_base = T5ForConditionalGeneration.from_pretrained("t5-small") # Start small
+        mm_llm = CustomEmbeddingT5(t5_base, embedding_dim=embedding_dim)
+        tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
+            # Create optimizer
+        optimizer = torch.optim.AdamW(mm_llm.parameters(), lr=learning_rate)
+
+            # Train and evaluate model
+        trained_model = run_exp(
+            exp_name=exp_name,
+            train_dl=train_dl,
+            test_dl=test_dl,
+            val_dl=val_dl,
+            model=mm_llm,
+            optimizer=optimizer,
+            tokenizer=tokenizer,
+            device=device,
+            num_epochs=num_epochs,
+            learning_rate=learning_rate,
+            model_dir=model_dir,
+            tensorboard_dir=tensorboard_dir
+        )
+        
+        print(trained_model)
+        
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")
             
