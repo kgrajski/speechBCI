@@ -42,7 +42,8 @@ The plot below shows the time series of trained VQ-VAE codebook indexes for a sa
 If the idea to use VQ-VAE was bogus, one might expect to see a random sequence of indexes.
 While the indexes have no intrinsic meaning, we are delighted to see what look like short segments of repeated values.
 They appear to be of the duration one likes to see for a neural speech coding.  Next step is to train some LLMs!
-[Example_Plot](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
+[Example Plot (HTML)](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
+[Example Plot (PNG)](figs/competitionData/train/VQ-VAE-Index-TimeSeries.png)
 
 
 ### Dependencies
