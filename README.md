@@ -19,11 +19,11 @@ The following set of slides describes this project at its outset.  As project pr
 This animation is from a single trial during which the subject "spoke" a sentence.
 Each point in the grid corresponds to an electrode.  The data is shown as a heat map movie.
 You may have to download the file and view it in your browser.
-[Example Animation (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_implot.html)
+![Example Animation (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_implot.html)
 
 This image is from the same animation as above, but shown as a time series.
 You may have to download the file and view it in your browser.
-[Example Time Series (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
+![Example Time Series (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
 ![Example Time Series (PNG)](figs/competitionData/train/ArrayTimeSeriesExample.png)
 
 Note: If you get the message that git cannot display such large html then download the figs folder and display locally.
@@ -45,7 +45,7 @@ The plot below shows the time series of trained VQ-VAE codebook indexes for a sa
 If the idea to use VQ-VAE was bogus, one might expect to see a random sequence of indexes.
 While the indexes have no intrinsic meaning, we are delighted to see what look like short segments of repeated values.
 They appear to be of the duration one likes to see for a neural speech coding.  Next step is to train some LLMs!
-[Example Plot (HTML)](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
+![Example Plot (HTML)](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
 ![Example Plot (PNG)](figs/competitionData/train/VQ-VAE-Index-TimeSeries.png)
 
 
