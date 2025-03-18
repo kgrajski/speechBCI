@@ -24,7 +24,7 @@ You may have to download the file and view it in your browser.
 This image is from the same animation as above, but shown as a time series.
 You may have to download the file and view it in your browser.
 [Example Time Series (HTML)](figs/competitionData/train/t12.2022.05.05_1_0_Ventral_tsplot.html)
-[Example Time Series (PNG)](figs/competitionData/train/ArrayTimeSeriesExample.png)
+![Example Time Series (PNG)](figs/competitionData/train/ArrayTimeSeriesExample.png)
 
 Note: If you get the message that git cannot display such large html then download the figs folder and display locally.
 
@@ -46,7 +46,7 @@ If the idea to use VQ-VAE was bogus, one might expect to see a random sequence o
 While the indexes have no intrinsic meaning, we are delighted to see what look like short segments of repeated values.
 They appear to be of the duration one likes to see for a neural speech coding.  Next step is to train some LLMs!
 [Example Plot (HTML)](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
-[Example Plot (PNG)](figs/competitionData/train/VQ-VAE-Index-TimeSeries.png)
+![Example Plot (PNG)](figs/competitionData/train/VQ-VAE-Index-TimeSeries.png)
 
 
 ### Dependencies
