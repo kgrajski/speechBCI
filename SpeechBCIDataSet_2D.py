@@ -29,17 +29,18 @@ from torch.utils.data import Dataset
 from SpeechBCI import ElectrodeArray
 from Sentence import Sentence
 
+
 class SpeechBCIDataSet_2D(Dataset):
     """
     PyTorch custom Dataset tuned for Speech BCI Array Recordings.
-    
+
     We treat each 2D array as an independent sample.
-    
+
     And in this simple starting point, we'll flatten the 2D to 1D.
-    
+
     That means that one input file will generate multiple samples.
     To do this, we spoof the classic sample, label pair in gen_dataset.
-    
+
     Note:
         Adhere to the convention of NTCHW.
 
@@ -48,7 +49,7 @@ class SpeechBCIDataSet_2D(Dataset):
         transform (callable, optional): Optional transform to be applied on a sample.
         target_transform (callable, optional): Optional transform to be applied on the target.
     """
-    
+
     def __init__(self, etl_dir, transform=None, target_transform=None):
         self.samples = self.gen_dataset(etl_dir)
         self.transform = transform
@@ -67,35 +68,39 @@ class SpeechBCIDataSet_2D(Dataset):
         Returns:
             np.ndarray: Array of samples.
         """
-        basefile_names = [f.split('.')[0] for f in os.listdir(etl_dir) if f.endswith('.csv')]
+        basefile_names = [
+            f.split(".")[0] for f in os.listdir(etl_dir) if f.endswith(".csv")
+        ]
         idkeys = []
         var_names = []
         for basefile in basefile_names:
-            parts = basefile.split('_')
-            if not (parts[-1] == 'sentenceText'):
-                idkeys.append('_'.join(parts[0:-3]))
-                var_names.append('_'.join(parts[-3:]))
+            parts = basefile.split("_")
+            if not (parts[-1] == "sentenceText"):
+                idkeys.append("_".join(parts[0:-3]))
+                var_names.append("_".join(parts[-3:]))
         idkeys = list(set(idkeys))
         var_names = set(var_names)
-        print(f"Found {len(idkeys)} unique idkeys and {len(var_names)} unique variable names {var_names}.")
+        print(
+            f"Found {len(idkeys)} unique idkeys and {len(var_names)} unique variable names {var_names}."
+        )
         var_names = list(var_names)
-        
+
         samples = []
         for idkey in idkeys:
             working_array = []
             for var_name in var_names:
-                fname = os.path.join(etl_dir + os.sep + idkey + '_' + var_name + '.csv')
+                fname = os.path.join(etl_dir + os.sep + idkey + "_" + var_name + ".csv")
                 x = ElectrodeArray()
                 x.load(fname)
                 working_array.append(x.xt.reshape(-1, x.num_rows, x.num_cols))
-                
+
             working_array = np.stack(working_array, axis=1)
             samples.append(working_array)
-            
+
         samples = np.concatenate(samples, axis=0)
- 
+
         return samples
-    
+
     def __getitem__(self, idx):
         """
         Get a sample from the dataset.

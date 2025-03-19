@@ -28,6 +28,7 @@ import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 
+
 def count_parameters(model):
     """
     Returns the total number of parameters in the model.
@@ -39,6 +40,7 @@ def count_parameters(model):
         int: Total number of parameters.
     """
     return sum(p.numel() for p in model.parameters())
+
 
 def count_trainable_parameters(model, show_details=False):
     """
@@ -56,6 +58,7 @@ def count_trainable_parameters(model, show_details=False):
             if param.requires_grad:
                 print(name, param.numel())
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 def train(loader, model, optimizer, device):
     """
@@ -84,7 +87,7 @@ def train(loader, model, optimizer, device):
         loss = recon_error + vq_loss
         loss.backward()
         optimizer.step()
-        
+
         data_recon_avg.append(recon_error.item())
         vq_loss_avg.append(vq_loss.item())
         perplexity_avg.append(perplexity.item())
@@ -92,9 +95,10 @@ def train(loader, model, optimizer, device):
     data_recon_avg = np.mean(data_recon_avg)
     vq_loss_avg = np.mean(vq_loss_avg)
     perplexity_avg = np.mean(perplexity_avg)
-        
+
     return data_recon_avg, vq_loss_avg, perplexity_avg
-        
+
+
 def test(loader, model, device):
     """
     Tests the model.
@@ -119,15 +123,27 @@ def test(loader, model, device):
             data_recon_avg += recon_error
             vq_loss_avg += vq_loss
             perplexity_avg += perplexity
-        
+
     data_recon_avg /= len(loader)
     vq_loss_avg /= len(loader)
     perplexity_avg /= len(loader)
-        
+
     return data_recon_avg, vq_loss_avg, perplexity_avg
 
-def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_epochs=1,
-            model_dir=None, show_plots=True, tensorboard_dir=None):
+
+def run_exp(
+    exp_name,
+    model,
+    train_dl,
+    test_dl,
+    val_dl,
+    optimizer,
+    device,
+    num_epochs=1,
+    model_dir=None,
+    show_plots=True,
+    tensorboard_dir=None,
+):
     """
     Runs the experiment, including training, testing, validation, and visualization.
 
@@ -151,40 +167,58 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
     print(model)
     print(f"Total parameters: {count_parameters(model)}")
     print(f"Trainable parameters: {count_trainable_parameters(model, True)}")
-    
+
     for iepoch in range(num_epochs):
         print(f"Epoch {iepoch+1}\n-------------------------------")
         data_recon, vq_loss, perplexity = train(train_dl, model, optimizer, device)
         writer.add_scalar("loss/train/reconstruction", data_recon.item(), iepoch)
         writer.add_scalar("loss/train/quantization", vq_loss.item(), iepoch)
         writer.add_scalar("loss/train/perplexity", perplexity.item(), iepoch)
-        print(f"Train Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
-        
+        print(
+            f"Train Loss: {data_recon.item()}",
+            f"VQ Loss: {vq_loss.item()}",
+            f"Perplexity: {perplexity.item()}",
+        )
+
         data_recon, vq_loss, perplexity = test(test_dl, model, device)
         writer.add_scalar("loss/test/reconstruction", data_recon.item(), iepoch)
         writer.add_scalar("loss/test/quantization", vq_loss.item(), iepoch)
         writer.add_scalar("loss/test/perplexity", perplexity.item(), iepoch)
-        print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
-        
-        if (model_dir is not None):
+        print(
+            f"Test Loss: {data_recon.item()}",
+            f"VQ Loss: {vq_loss.item()}",
+            f"Perplexity: {perplexity.item()}",
+        )
+
+        if model_dir is not None:
             os.makedirs(model_dir, exist_ok=True)
-            torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_" + str(iepoch) + ".pt"))
-        
+            torch.save(
+                model.state_dict(),
+                os.path.join(model_dir, exp_name + "_" + str(iepoch) + ".pt"),
+            )
+
     data_recon, vq_loss, perplexity = test(val_dl, model, device)
     writer.add_scalar("loss/val/reconstruction", data_recon.item(), iepoch)
     writer.add_scalar("loss/val/quantization", vq_loss.item(), iepoch)
     writer.add_scalar("loss/val/perplexity", perplexity.item(), iepoch)
-    print(f"Validation Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+    print(
+        f"Validation Loss: {data_recon.item()}",
+        f"VQ Loss: {vq_loss.item()}",
+        f"Perplexity: {perplexity.item()}",
+    )
 
     if model_dir is not None:
-        torch.save(model.state_dict(), os.path.join(model_dir, exp_name + "_final" + ".pt"))
-        
+        torch.save(
+            model.state_dict(), os.path.join(model_dir, exp_name + "_final" + ".pt")
+        )
+
     if show_plots:
-        proj = umap.UMAP(n_neighbors=3, min_dist=0.1,
-                    metric="cosine").fit_transform(model._vq_vae._embedding.weight.data.cpu())
-        
+        proj = umap.UMAP(n_neighbors=3, min_dist=0.1, metric="cosine").fit_transform(
+            model._vq_vae._embedding.weight.data.cpu()
+        )
+
         fig, ax = plt.subplots()
-        ax.scatter(proj[:,0], proj[:,1])
+        ax.scatter(proj[:, 0], proj[:, 1])
         ax.set_title("Embedding Space Representation")
         writer.add_figure("Embedding Plot", fig, global_step=0)
 
@@ -197,15 +231,21 @@ def run_exp(exp_name, model, train_dl, test_dl, val_dl, optimizer, device, num_e
         if len(valid_originals.shape) == 4:
             img_grid = make_grid(valid_originals, nrow=16, scale_each=True)
         else:
-            img_grid = make_grid(valid_originals[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
-        #writer.add_image("Originals", img_grid)
-        
+            img_grid = make_grid(
+                valid_originals[1, :, :, :, :].squeeze(0), nrow=16, scale_each=True
+            )
+        # writer.add_image("Originals", img_grid)
+
         if len(valid_reconstructions.shape) == 4:
             img_grid = make_grid(valid_reconstructions, nrow=16, scale_each=True)
         else:
-            img_grid = make_grid(valid_reconstructions[1,:,:,:,:].squeeze(0), nrow=16, scale_each=True)
-        #writer.add_image("Reconstructions", img_grid)
-        
+            img_grid = make_grid(
+                valid_reconstructions[1, :, :, :, :].squeeze(0),
+                nrow=16,
+                scale_each=True,
+            )
+        # writer.add_image("Reconstructions", img_grid)
+
         writer.add_graph(model, valid_originals)
 
     writer.close()

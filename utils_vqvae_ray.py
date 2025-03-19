@@ -29,6 +29,7 @@ from Vqvae_Simple3D import VQVAE
 # Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py
 #
 
+
 def count_parameters(model):
     """
     Returns the total number of parameters in the model.
@@ -40,6 +41,7 @@ def count_parameters(model):
         int: Total number of parameters.
     """
     return sum(p.numel() for p in model.parameters())
+
 
 def count_trainable_parameters(model, show_details=False):
     """
@@ -57,6 +59,7 @@ def count_trainable_parameters(model, show_details=False):
             if param.requires_grad:
                 print(name, param.numel())
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 def train_vqvae(config, checkpoint_dir=None):
     """
@@ -88,50 +91,74 @@ def train_vqvae(config, checkpoint_dir=None):
     test_prop = config["test_prop"]
     train_prop = 1 - test_prop
 
-    #torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
     study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth)
-    train_test_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is False]
-    val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i] is True]
+    train_test_indices = [
+        i
+        for i in range(len(study_dataset.val_flag))
+        if study_dataset.val_flag[i] is False
+    ]
+    val_indices = [
+        i
+        for i in range(len(study_dataset.val_flag))
+        if study_dataset.val_flag[i] is True
+    ]
 
     train_test_dataset = Subset(study_dataset, train_test_indices)
-    train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
+    train_dataset, test_dataset = random_split(
+        train_test_dataset, [train_prop, test_prop]
+    )
     val_dataset = Subset(study_dataset, val_indices)
-    
+
     train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = VQVAE(encoder_in_channels, encoder_out_channels, kernel_size, stride, padding,
-                  num_resid_layers, num_resid_channels,
-                  num_embeddings, embedding_dim, commitment_cost, decay).to(device)
+    model = VQVAE(
+        encoder_in_channels,
+        encoder_out_channels,
+        kernel_size,
+        stride,
+        padding,
+        num_resid_layers,
+        num_resid_channels,
+        num_embeddings,
+        embedding_dim,
+        commitment_cost,
+        decay,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
 
-    #writer = SummaryWriter(os.path.join("runs" + os.sep + exp_name))
+    # writer = SummaryWriter(os.path.join("runs" + os.sep + exp_name))
     for iepoch in range(num_epochs):
-        #print(f"Epoch {iepoch+1}\n-------------------------------")
-        train_data_recon, train_vq_loss, train_perplexity = train(train_dl, model, optimizer, device)
-        #writer.add_scalar("loss/train/reconstruction", data_recon.item(), iepoch)
-        #writer.add_scalar("loss/train/quantization", vq_loss.item(), iepoch)
-        #writer.add_scalar("loss/train/perplexity", perplexity.item(), iepoch)
-        #print(f"Train Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
-        
+        # print(f"Epoch {iepoch+1}\n-------------------------------")
+        train_data_recon, train_vq_loss, train_perplexity = train(
+            train_dl, model, optimizer, device
+        )
+        # writer.add_scalar("loss/train/reconstruction", data_recon.item(), iepoch)
+        # writer.add_scalar("loss/train/quantization", vq_loss.item(), iepoch)
+        # writer.add_scalar("loss/train/perplexity", perplexity.item(), iepoch)
+        # print(f"Train Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+
         test_data_recon, test_vq_loss, test_perplexity = test(test_dl, model, device)
-        #writer.add_scalar("loss/test/reconstruction", data_recon.item(), iepoch)
-        #writer.add_scalar("loss/test/quantization", vq_loss.item(), iepoch)
-        #writer.add_scalar("loss/test/perplexity", perplexity.item(), iepoch)
-        #print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
-        
+        # writer.add_scalar("loss/test/reconstruction", data_recon.item(), iepoch)
+        # writer.add_scalar("loss/test/quantization", vq_loss.item(), iepoch)
+        # writer.add_scalar("loss/test/perplexity", perplexity.item(), iepoch)
+        # print(f"Test Loss: {data_recon.item()}", f"VQ Loss: {vq_loss.item()}", f"Perplexity: {perplexity.item()}")
+
         tune.report(
-            {"reconstruction_loss_train": train_data_recon.item(),
-             "quantization_loss_train": train_vq_loss.item(),
-             "perplexity_train": train_perplexity.item(),
-             "reconstruction_loss_test": test_data_recon.item(),
-             "quantization_loss_test": test_vq_loss.item(),
-             "perplexity_test": test_perplexity.item(),
-             }
+            {
+                "reconstruction_loss_train": train_data_recon.item(),
+                "quantization_loss_train": train_vq_loss.item(),
+                "perplexity_train": train_perplexity.item(),
+                "reconstruction_loss_test": test_data_recon.item(),
+                "quantization_loss_test": test_vq_loss.item(),
+                "perplexity_test": test_perplexity.item(),
+            }
         )
 
-    #writer.close()
+    # writer.close()
+
 
 def train(loader, model, optimizer, device):
     """
@@ -156,17 +183,18 @@ def train(loader, model, optimizer, device):
         loss = recon_error + vq_loss
         loss.backward()
         optimizer.step()
-        
+
         data_recon_avg += recon_error
         vq_loss_avg += vq_loss
         perplexity_avg += perplexity
-    
+
     data_recon_avg /= len(loader)
     vq_loss_avg /= len(loader)
     perplexity_avg /= len(loader)
-    
+
     return data_recon_avg, vq_loss_avg, perplexity_avg
-        
+
+
 def test(loader, model, device):
     """
     Tests the model.
@@ -190,9 +218,9 @@ def test(loader, model, device):
             data_recon_avg += recon_error
             vq_loss_avg += vq_loss
             perplexity_avg += perplexity
-        
+
     data_recon_avg /= len(loader)
     vq_loss_avg /= len(loader)
     perplexity_avg /= len(loader)
-        
+
     return data_recon_avg, vq_loss_avg, perplexity_avg
