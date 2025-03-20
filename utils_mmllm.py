@@ -38,7 +38,7 @@ torch.cuda.empty_cache()
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 
-def get_lora_model(base_model, r=8, alpha=32, dropout=0.1):
+def get_lora_model(base_model, r=16, alpha=32, dropout=0.1):
     """
     Apply LoRA configuration to a T5 model.
 
@@ -53,11 +53,11 @@ def get_lora_model(base_model, r=8, alpha=32, dropout=0.1):
     """
     lora_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM,
-        r=r,
+        r=r,                    # Increase rank
         lora_alpha=alpha,
         lora_dropout=dropout,
-        target_modules=["q", "v"],  # Apply to query and value matrices
-        bias="none",
+        target_modules=["q", "v", "k", "o"],  # Add key and output matrices
+        bias="lora_only",        # Add bias adaptation 
     )
 
     lora_model = get_peft_model(base_model, lora_config)
@@ -83,7 +83,11 @@ class CustomEmbeddingT5(torch.nn.Module):
         """
         super().__init__()
         self.t5_model = t5_model
-        self.input_adapter = torch.nn.Linear(embedding_dim, t5_model.config.d_model)
+        self.input_adapter = torch.nn.Sequential(
+torch.nn.Linear(embedding_dim, t5_model.config.d_model * 2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(t5_model.config.d_model * 2, t5_model.config.d_model)
+)
 
     def forward(
         self, inputs_embeds, attention_mask, decoder_input_ids=None, labels=None
@@ -152,7 +156,6 @@ class CustomEmbeddingT5(torch.nn.Module):
             print(f"Trainable parameters: {trainable_params}")
             print(f"Total parameters: {all_params}")
             print(f"Trainable%: {100 * trainable_params / all_params:.2f}%")
-
 
 def calculate_wer(predictions, targets, tokenizer, model_dir, split_name):
     """
@@ -455,12 +458,22 @@ def evaluate(
             steps += 1
 
             # Generate predictions
+            # MVP approach says hardcode values; later we optimize.
             generated_ids = model.generate(
                 inputs_embeds=inputs,
                 attention_mask=attention_mask,
                 max_length=max_gen_seq_len,
+                min_length=2,  # Prevent empty generations
                 num_beams=num_gen_beams,
                 early_stopping=True,
+                do_sample=True,          # Enable sampling 
+                temperature=0.7,         # Lower = more focused
+                top_k=50,                # Consider top 50 tokens
+                top_p=0.95,              # Nucleus sampling
+                no_repeat_ngram_size=2,  # Prevent repetitive text
+                repetition_penalty=1.2,  # Discourage repeating tokens
+                length_penalty=1.0,  # Encourage longer outputs
+                bad_words_ids=[[0]],  # Prevent generating only padding tokens
             )
 
             all_preds.extend(generated_ids.detach().cpu())

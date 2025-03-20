@@ -19,6 +19,11 @@ Development Reminders:
     TensorBoard Visualization:
         tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM'
         # Then open browser to http://localhost:6006/
+        
+    Monitoring Learning Progres:
+    Go to llm_model_dir and look at the predictions files...
+    cat MM_LLM_training_set_epoch_3_predictions.txt  | grep "Predicted" | sort | uniq -c
+    
 """
 
 #
@@ -77,7 +82,7 @@ def main():
     model_dir = os.path.join(model_dir, model_exp_name)
 
     mmllm_model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
-    mmllm_model_dir = os.path.join(model_dir, exp_name)
+    mmllm_model_dir = os.path.join(mmllm_model_dir, exp_name)
     os.makedirs(mmllm_model_dir, exist_ok=True)
 
     tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
@@ -86,15 +91,15 @@ def main():
 
     embedding_dim = 64  # Later can make this automatic.
     max_seq_len = 512
-    num_epochs = 5
-    learning_rate = 5e-4
+    num_epochs = 100
+    learning_rate = 1e-4
     training = True
 
     test_prop = 0.2
     train_prop = 1 - test_prop
     batch_size = 16
-    max_gen_seq_len = 32
-    num_gen_beams = 5
+    max_gen_seq_len = 64
+    num_gen_beams = 3
 
     #
     # Need model info to set up the optimizer and prep for transformer, such as
@@ -191,7 +196,7 @@ def main():
             num_epochs=num_epochs,
             max_gen_seq_len=max_gen_seq_len,
             num_gen_beams=num_gen_beams,
-            model_dir=model_dir,
+            model_dir=mmllm_model_dir,
             tensorboard_dir=tensorboard_dir,
         )
 

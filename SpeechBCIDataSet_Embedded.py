@@ -15,7 +15,6 @@ from tqdm import tqdm
 from Sentence import Sentence
 from transformers import T5Tokenizer
 
-
 class SpeechBCIDataSet_Embedded(Dataset):
 
     # Class-level tokenizer variable - initialized only once
