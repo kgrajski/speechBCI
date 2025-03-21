@@ -54,7 +54,7 @@ class VectorQuantizer(nn.Module):
     def __init__(
         self,
         num_embeddings=64,
-        embedding_dim=128,
+        embedding_dim=64,
         commitment_cost=0.25,
         decay=0.99,
         epsilon=1e-5,
@@ -327,10 +327,12 @@ class PreVQLayer(nn.Module):
         padding (int): Zero-padding added to all sides of the input. Default: 0
     """
 
-    def __init__(self, embedding_dim, in_channels=128):
+    def __init__(
+        self, in_channels=128, out_channels=64, kernel_size=2, stride=2, padding=0
+    ):
         super(PreVQLayer, self).__init__()
         self._pre_vq_conv = nn.Conv3d(
-            in_channels, embedding_dim, kernel_size=2, stride=2, padding=0
+            in_channels, out_channels, kernel_size, stride=2, padding=0
         )
 
     def forward(self, inputs):
@@ -360,10 +362,12 @@ class PostVQLayer(nn.Module):
         padding (int): Zero-padding added to all sides of the input. Default: 0
     """
 
-    def __init__(self, embedding_dim, out_channels=128):
+    def __init__(
+        self, in_channels=64, out_channels=128, kernel_size=2, stride=2, padding=0
+    ):
         super(PostVQLayer, self).__init__()
         self._post_vq_conv = nn.ConvTranspose3d(
-            embedding_dim, out_channels, kernel_size=2, stride=2, padding=0
+            in_channels, out_channels, kernel_size, stride=2, padding=0
         )
 
     def forward(self, inputs):
@@ -460,15 +464,15 @@ class VQVAE(nn.Module):
     input → encoder → pre_vq → vector_quantizer → post_vq → decoder → output
     """
 
-    def __init__(self, embedding_dim=128, num_embeddings=128):
+    def __init__(self):
         super(VQVAE, self).__init__()
         self._encoder = Encoder()
-        self._pre_vq = PreVQLayer(embedding_dim)
+        self._pre_vq = PreVQLayer()
 
         # Note that for now are using plain vanilla VectorQuantizer
-        self._vq_vae = VectorQuantizer(embedding_dim, num_embeddings)
+        self._vq_vae = VectorQuantizer()
 
-        self._post_vq = PostVQLayer(embedding_dim)
+        self._post_vq = PostVQLayer()
         self._decoder = Decoder()
 
     def forward(self, x):

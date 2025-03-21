@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/<exp_name>"
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_128_128"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -57,25 +57,29 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
 
-    exp_name = "VQVAE_Simple_3D"
+    exp_name = "VQVAE_128_128"
 
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
+
     model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
     model_dir = os.path.join(model_dir, exp_name)
     os.makedirs(model_dir, exist_ok=True)
+
     tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     os.makedirs(tensorboard_dir, exist_ok=True)
 
     num_epochs = 10
+    embedding_dim = 128
+    num_embeddings = 128
 
     encoder_depth = 8  # Recall convention: B,C,D,H,W; 8 is the depth of the encoder
     depth_step_size = 2  # The stride when making samples from the raw input data.
 
     learning_rate = 1e-3
 
-    training = False
+    training = True
     encoding = True
 
     test_prop = 0.2
@@ -111,7 +115,7 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = VQVAE().to(device)
+    model = VQVAE(embedding_dim, num_embeddings).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
 
     if training:

@@ -1,9 +1,9 @@
 """
 Multimodal Language Model for Speech BCI Data
 
-This module fine-tunes a T5 language model with LoRA adaptation to process
-Speech BCI embeddings and generate text. It loads pre-trained VQVAE embeddings
-and uses a custom adapter architecture for multimodal integration.
+This module fine-tunes a language model with LoRA adaptation to process
+Speech BCI embeddings and generate text. It supports multiple model types
+including T5 and BART.
 
 Functions:
     main(): Sets up and runs the multimodal language model training experiment.
@@ -17,39 +17,34 @@ Development Reminders:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
     
     TensorBoard Visualization:
-        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM'
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_T5/' --port=6006
         # Then open browser to http://localhost:6006/
         
     Monitoring Learning Progres:
-    Go to llm_model_dir and look at the predictions files...
-    cat MM_LLM_training_set_epoch_3_predictions.txt  | grep "Predicted" | sort | uniq -c
+        Go to llm_model_dir and look at the predictions files...
+        cat MM_LLM_T5_training_set_epoch_7_predictions.txt  | grep "Predicted (original)" | sort | uniq -c
     
 """
 
-#
-# Updated: March 19, 2025
-#
-
 import sys
-
-sys.path.append("./")
-
-import gc
-import numpy as np
 import os
 import time
+import gc
+import numpy as np
 import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader, Subset, random_split
+from torch.utils.data import DataLoader, random_split, Subset  # Added Subset
 
 from SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
-from transformers import T5Tokenizer, T5ForConditionalGeneration
-from utils_mmllm import (
-    get_vqvae_codebook_average,
-    run_exp,
-    CustomEmbeddingT5,
-    get_lora_model,
+from transformers import (
+    T5Tokenizer,
+    T5ForConditionalGeneration,
+    BartTokenizer,
+    BartForConditionalGeneration,
 )
+
+from mmllm.data_utils import get_vqvae_codebook_average
+from mmllm.training_utils import run_exp
+from mmllm.model_utils import create_embedding_model, get_lora_model
 from Vqvae_Simple3D import VQVAE
 
 
@@ -61,6 +56,7 @@ def main():
     start_time = time.perf_counter()
     print("*** " + script_name + " - START ***\n")
 
+    # Set device and seed for reproducibility
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device=", device)
     if device == "cuda":
@@ -72,45 +68,70 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
 
-    exp_name = "MM_LLM"
-    model_exp_name = "VQVAE_Simple_3D"
+    # Choose model type: 't5' or 'bart'
+    model_type = "bart"  # Change to 'bart' to use BART instead
 
-    etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
-    embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
+    # Experiment configuration
+    exp_name = f"MM_LLM_{model_type.upper()}"
+    vqvae_model_name = "VQVAE_128_128"
 
-    model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
-    model_dir = os.path.join(model_dir, model_exp_name)
+    # Directory setup
+    root_dir = "/home/ubuntu"
+    project_dir = os.path.join(root_dir, "speechBCI")
+    data_dir = os.path.join(project_dir, "data/competitionData")
 
-    mmllm_model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
-    mmllm_model_dir = os.path.join(mmllm_model_dir, exp_name)
+    # Define all data directories using the common root
+    etl_dir = os.path.join(data_dir, "etl")  # This will be read only
+    embed_dir = os.path.join(data_dir, "embeddings")  # This will be written to
+    models_base_dir = os.path.join(data_dir, "models")
+    tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
+
+    # Model-specific directories
+    vqvae_model_dir = os.path.join(
+        models_base_dir, vqvae_model_name
+    )  # This will be read only
+    mmllm_model_dir = os.path.join(models_base_dir, exp_name)  # This will be written to
     os.makedirs(mmllm_model_dir, exist_ok=True)
 
-    tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
-    tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
+    # TensorBoard directory
+    tensorboard_dir = os.path.join(
+        tensorboard_base_dir, exp_name
+    )  # This will be written to
     os.makedirs(tensorboard_dir, exist_ok=True)
 
-    embedding_dim = 64  # Later can make this automatic.
-    max_seq_len = 512
-    num_epochs = 100
+    # Hyperparameters
+    embedding_dim = 128
+    max_seq_len = (
+        512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
+    )
+    num_epochs = 10
     learning_rate = 1e-4
     training = True
-
     test_prop = 0.2
     train_prop = 1 - test_prop
     batch_size = 16
     max_gen_seq_len = 64
     num_gen_beams = 3
 
-    #
-    # Need model info to set up the optimizer and prep for transformer, such as
-    # by computing the average codebook vector.  May be model-dependent.
-    #
-    model = VQVAE()
-    model.load_state_dict(
-        torch.load(os.path.join(model_dir, model_exp_name + "_final" + ".pt"))
+    # VQVAE model for embedding preparation
+    vqvae_model = VQVAE()
+    vqvae_model.load_state_dict(
+        torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final.pt"))
     )
-    padding_vector = get_vqvae_codebook_average(model)
-    del model  # Don't need the model after this point.
+    padding_vector = get_vqvae_codebook_average(vqvae_model)
+
+    # Load appropriate model and tokenizer based on model type
+    if model_type == "t5":
+        tokenizer = T5Tokenizer.from_pretrained("t5-small", legacy=True)
+        base_model = T5ForConditionalGeneration.from_pretrained("t5-small")
+    elif model_type == "bart":
+        # Standard BART (not multilingual)
+        tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+        base_model = BartForConditionalGeneration.from_pretrained("facebook/bart-base")
+        # Make clear we're using standard BART without language codes
+        print("Using standard BART without multilingual support")
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
 
     #
     # Per Willett, et al. competition data, the last block in each session
@@ -118,10 +139,15 @@ def main():
     # and split the remaining data into training and validation sets.
     # Note: in the official competition, there is a distinct validation (holdout) set.
     # In MVP stage, there will be model-dependent methods in SpeechBCIDataSet_Embedded
-    #
-    # torch.autograd.set_detect_anomaly(True)
+    # to handle this.
+    # Create dataset with proper padding vector
     study_dataset = SpeechBCIDataSet_Embedded(
-        etl_dir, embed_dir, max_seq_len, padding_vector
+        embed_dir=embed_dir,
+        etl_dir=etl_dir,
+        tokenizer=tokenizer,
+        model_type=model_type,
+        max_seq_len=max_seq_len,
+        padding_vector=padding_vector,
     )
 
     #
@@ -131,10 +157,6 @@ def main():
     # use the last block in each session as the withheld validation set.  The remaining
     # data we'll split into the traditional training and test set.
     # Consequently, it makes sense to have a quick
-    #
-    # Generate some statistics on the raw words in the training and testing sets.
-    #
-    study_dataset._train_test_label_compare()
 
     # Now subset the study data as described above.
     train_test_indices = [
@@ -157,33 +179,22 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
+    # Create LoRA model
+    lora_base_model = get_lora_model(base_model, model_type=model_type)
+
+    # Create MMLLM model with appropriate adapter
+    mm_llm = create_embedding_model(
+        model_type=model_type, base_model=lora_base_model, embedding_dim=embedding_dim
+    )
+
+    # Display model information
+    mm_llm.print_trainable_parameters()
+
+    # Set up optimizer
+    optimizer = torch.optim.AdamW(mm_llm.parameters(), lr=learning_rate)
+
     if training:
-        # Load the base T5 model
-        t5_model_name = "t5-small"
-        t5_model = T5ForConditionalGeneration.from_pretrained(t5_model_name)
-
-        # Apply LoRA to T5
-        lora_model = get_lora_model(
-            t5_model,
-            r=8,  # LoRA rank - smaller = fewer parameters
-            alpha=32,  # LoRA alpha scaling factor
-            dropout=0.1,  # LoRA dropout rate
-        )
-
-        # Create custom embedding adapter with LoRA model
-        mm_llm = CustomEmbeddingT5(lora_model, embedding_dim=embedding_dim)
-
-        # Print parameter efficiency statistics
-        mm_llm.print_trainable_parameters()
-
-        tokenizer = T5Tokenizer.from_pretrained(t5_model_name, legacy=True)
-
-        # Create optimizer - only trainable parameters will be updated
-        optimizer = torch.optim.AdamW(
-            mm_llm.parameters(), lr=learning_rate
-        )  # Using a higher LR for LoRA
-
-        # Train and evaluate model
+        # Train and evaluate the model
         trained_model = run_exp(
             exp_name=exp_name,
             train_dl=train_dl,
@@ -198,12 +209,12 @@ def main():
             num_gen_beams=num_gen_beams,
             model_dir=mmllm_model_dir,
             tensorboard_dir=tensorboard_dir,
+            model_type=model_type,  # Pass model type to functions
         )
 
-        print(trained_model)
-
-    print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
-    print("*** " + script_name + " - END ***")
+    end_time = time.perf_counter()
+    print(f"\nTotal runtime: {end_time - start_time:.2f} seconds")
+    print(f"*** {script_name} - END ***")
 
 
 if __name__ == "__main__":

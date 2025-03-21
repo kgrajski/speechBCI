@@ -15,18 +15,18 @@ from tqdm import tqdm
 from Sentence import Sentence
 from transformers import T5Tokenizer
 
-class SpeechBCIDataSet_Embedded(Dataset):
 
-    # Class-level tokenizer variable - initialized only once
-    _tokenizer = None
+class SpeechBCIDataSet_Embedded(Dataset):
 
     #
     # The required basic methods: __init__, __len__, and __getitem__.
     #
     def __init__(
         self,
-        label_dir,
-        embeddings_dir,
+        embed_dir,
+        etl_dir,
+        tokenizer,
+        model_type,
         max_seq_len,
         padding_vector,
         transform=None,
@@ -39,7 +39,9 @@ class SpeechBCIDataSet_Embedded(Dataset):
             self.label_ids,
             self.label_masks,
             self.val_flag,
-        ) = self.gen_dataset(label_dir, embeddings_dir, max_seq_len, padding_vector)
+        ) = self.gen_dataset(
+            embed_dir, etl_dir, max_seq_len, padding_vector, model_type, tokenizer
+        )
 
         self.transform = transform
         self.target_transform = target_transform
@@ -51,19 +53,25 @@ class SpeechBCIDataSet_Embedded(Dataset):
         return {
             "vqvae_embeddings": self.samples[idx].clone().detach(),
             "attention_mask": self.attention_masks[idx].clone().detach(),
-            "label_embeddings": self.label_ids[idx]
-            .clone()
-            .detach(),  # Changed key name to match T5 expectations
+            "label_embeddings": self.label_ids[idx].clone().detach(),
             "label_attention_mask": self.label_masks[idx].clone().detach(),
+            "original_text": self.labels[idx],  # Include original text
         }
 
-        #
-        # Additional methods to transform embedded data for use in fine-tuning an LLM.
-        # Trying to be LLM-agnostic, but at a certain level that files, such as with
-        # respect to tokenizers and other requirements.
-        #
+    #
+    # The following methods are used to generate the dataset.
+    # Preference is to load all of the data into memory at once.
+    #
 
-    def gen_dataset(self, label_dir, embeddings_dir, max_seq_len, padding_vector):
+    def gen_dataset(
+        self,
+        embeddings_dir,
+        label_dir,
+        max_seq_len,
+        padding_vector,
+        model_type,
+        tokenizer,
+    ):
 
         samples = []
         labels = []
@@ -110,12 +118,15 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
         for sample, label in tqdm(zip(samples, labels), desc="Tokenizing Trial Data"):
 
+            # If introducing new model types beyond T5 and BART, may need to
+            # adjust the padding and attention mask handling in light of any
+            # possible input length requirements.
             padded, mask = self._pad_sample(sample, max_seq_len, padding_vector)
             padded_samples.append(padded)
             sample_attention_masks.append(mask)
 
-            # MVP approach says let this model-specific call sit here for now.
-            padded, mask = self._pad_label_t5(label, max_seq_len)
+            # Label padding is model-specific, but details are in the method.
+            padded, mask = self._pad_label(label, max_seq_len, model_type, tokenizer)
             padded_label_ids.append(padded.squeeze())
             label_attention_masks.append(mask.squeeze())
 
@@ -167,227 +178,40 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
         return padded_sample, mask
 
-    @classmethod
-    def _pad_label_t5(cls, labels, max_seq_len):
+    @staticmethod
+    def _pad_label(label, max_seq_len, model_type, tokenizer):
+        """
+        Tokenize and pad label text with model-specific handling.
 
-        # Initialize tokenizer
-        if cls._tokenizer is None:
-            cls._tokenizer = T5Tokenizer.from_pretrained("t5-base", legacy=True)
+        Args:
+            label: Text to tokenize
+            max_seq_len: Maximum sequence length
+            model_type: Model type ('t5', 'bart', etc.)
+            tokenizer: HuggingFace tokenizer
 
-        encoded_labels = cls._tokenizer(
-            labels,
+        Returns:
+            tuple: (input_ids, attention_mask)
+        """
+        encoded_labels = tokenizer(
+            label,
             padding="max_length",
             max_length=max_seq_len,
             truncation=True,
             return_tensors="pt",
         )
 
-        return encoded_labels.input_ids, encoded_labels.attention_mask
-
-        #
-        # The following methods process the raw label data.  Mainly
-        # used during data exploration phase.
-        #
-
-    @staticmethod
-    def _get_label_statistics(labels):
-
-        # Remove punctuation and convert to lowercase
-        translator = str.maketrans("", "", string.punctuation)
-        cleaned_labels = [label.translate(translator).lower() for label in labels]
-
-        # Find the length of the longest and shortest labels
-        longest_label_length = len(max(cleaned_labels, key=len))
-        shortest_label_length = len(min(cleaned_labels, key=len))
-
-        # Split labels into words
-        words = [word for label in cleaned_labels for word in label.split()]
-
-        # Count word frequencies
-        word_counts = collections.Counter(words)
-
-        # Get unique words
-        unique_words = set(words)
-
-        # Calculate average sentence length
-        avg_sentence_length = sum(len(label.split()) for label in cleaned_labels) / len(
-            cleaned_labels
-        )
-
-        # Get top 20 most frequent words
-        top_20_words = word_counts.most_common(20)
-
-        # Get bottom 20 least frequent words
-        bottom_20_words = word_counts.most_common()[:-21:-1]
-
-        # Calculate total number of words
-        total_words = len(words)
-
-        return {
-            "longest_label_length": longest_label_length,
-            "shortest_label_length": shortest_label_length,
-            "longest_label_length": longest_label_length,
-            "shortest_label_length": shortest_label_length,
-            "words": words,
-            "unique_words": unique_words,
-            "unique_words_count": len(unique_words),
-            "top_20_words": top_20_words,
-            "bottom_20_words": bottom_20_words,
-            "avg_sentence_length": avg_sentence_length,
-            "total_words": total_words,
-        }
-
-    def _train_test_label_compare(self):
-        """
-        Compares label statistics between training and testing sets.
-
-        Returns:
-            dict: Dictionary containing various statistics and comparisons.
-        """
-        # Split labels into training and testing sets
-        train_labels = [
-            label for label, flag in zip(self.labels, self.val_flag) if not flag
-        ]
-        test_labels = [label for label, flag in zip(self.labels, self.val_flag) if flag]
-
-        # Get statistics for training and testing sets
-        # The statistics include the number of words, unique words, and the words themselves
-        # And the labels are "cleaned" so use these for further stats.
-        train_stats = self._get_label_statistics(train_labels)
-        test_stats = self._get_label_statistics(test_labels)
-
-        unique_train_words = train_stats["unique_words"]
-        unique_test_words = test_stats["unique_words"]
-
-        # Calculate common, unique to training, and unique to testing words
-        common_words = unique_train_words & unique_test_words
-        words_unique_to_train = unique_train_words - unique_test_words
-        words_unique_to_test = unique_test_words - unique_train_words
-
-        # For the common_words, what is their frequency in the training and testing sets?
-        common_word_counts_train = {
-            word: train_stats["words"].count(word) for word in common_words
-        }
-        common_word_counts_test = {
-            word: test_stats["words"].count(word) for word in common_words
-        }
-
-        # Get top 20 common words in training and testing sets
-        top_20_common_words_train = collections.Counter(
-            common_word_counts_train
-        ).most_common(20)
-        top_20_common_words_test = collections.Counter(
-            common_word_counts_test
-        ).most_common(20)
-
-        # Get top 20 unique words in training and testing sets
-        top_20_unique_train_words = collections.Counter(
-            {word: train_stats["words"].count(word) for word in words_unique_to_train}
-        ).most_common(20)
-        top_20_unique_test_words = collections.Counter(
-            {word: test_stats["words"].count(word) for word in words_unique_to_test}
-        ).most_common(20)
-
-        # self.label_masks is a list of boolean tensors, one per label
-        # Use self.label_masks to find the longest embedded label length.
-        # This is useful to help set the value of max_gen_seq_len
-        # for the T5 model.  Do similar for the embedded input data via
-        # attention_masks.
-        max_embedded_label_len = max([mask.sum() for mask in self.label_masks])
-        max_attention_mask_len = max([mask.sum() for mask in self.attention_masks])
-
-        label_stats = {
-            "train_stats": train_stats,
-            "test_stats": test_stats,
-            "common_words_count": len(common_words),
-            "unique_train_words_count": len(unique_train_words),
-            "unique_test_words_count": len(unique_test_words),
-            "top_20_common_words_train": top_20_common_words_train,
-            "top_20_common_words_test": top_20_common_words_test,
-            "top_20_unique_train_words": top_20_unique_train_words,
-            "top_20_unique_test_words": top_20_unique_test_words,
-            "max_embedded_label_len": max_embedded_label_len,
-            "max_attention_mask_len": max_attention_mask_len,
-        }
-        self._pretty_print_label_stats(label_stats)
-
-    @staticmethod
-    def _pretty_print_label_stats(label_stats):
-        """
-        Pretty prints the contents of the label_stats dictionary.
-
-        Args:
-            label_stats (dict): Dictionary containing various statistics and comparisons.
-        """
-        # Exclude 'unique_words' and 'words' keys from train_stats and test_stats
-        train_stats_filtered = {
-            k: v
-            for k, v in label_stats["train_stats"].items()
-            if k not in ["unique_words", "words"]
-        }
-        test_stats_filtered = {
-            k: v
-            for k, v in label_stats["test_stats"].items()
-            if k not in ["unique_words", "words"]
-        }
-
-        print("Training Set Statistics:")
-        print(
-            tabulate(
-                train_stats_filtered.items(),
-                headers=["Statistic", "Value"],
-                tablefmt="grid",
-            )
-        )
-
-        print("\nTesting Set Statistics:")
-        print(
-            tabulate(
-                test_stats_filtered.items(),
-                headers=["Statistic", "Value"],
-                tablefmt="grid",
-            )
-        )
-
-        print("\nCommon Words Count:", label_stats["common_words_count"])
-        print("Unique Train Words Count:", label_stats["unique_train_words_count"])
-        print("Unique Test Words Count:", label_stats["unique_test_words_count"])
-
-        print("\nTop 20 Common Words in Training Set:")
-        print(
-            tabulate(
-                label_stats["top_20_common_words_train"],
-                headers=["Word", "Count"],
-                tablefmt="grid",
-            )
-        )
-
-        print("\nTop 20 Common Words in Testing Set:")
-        print(
-            tabulate(
-                label_stats["top_20_common_words_test"],
-                headers=["Word", "Count"],
-                tablefmt="grid",
-            )
-        )
-
-        print("\nTop 20 Unique Train Words:")
-        print(
-            tabulate(
-                label_stats["top_20_unique_train_words"],
-                headers=["Word", "Count"],
-                tablefmt="grid",
-            )
-        )
-
-        print("\nTop 20 Unique Test Words:")
-        print(
-            tabulate(
-                label_stats["top_20_unique_test_words"],
-                headers=["Word", "Count"],
-                tablefmt="grid",
-            )
-        )
-
-        print("\nMax Embedded Label Length:", label_stats["max_embedded_label_len"])
-        print("Max Attention Mask Length:", label_stats["max_attention_mask_len"])
+        # Apply model-specific padding token handling
+        # Note: No need for cloning here as this runs once during initialization
+        if model_type.lower() == "t5":
+            # T5 uses -100 as the padding index for loss calculation
+            input_ids = encoded_labels.input_ids
+            input_ids[input_ids == tokenizer.pad_token_id] = -100
+            return input_ids, encoded_labels.attention_mask
+        elif model_type.lower() == "bart":
+            # BART uses the regular pad_token_id
+            return encoded_labels.input_ids, encoded_labels.attention_mask
+        else:
+            # Default to T5-style padding for unknown models
+            input_ids = encoded_labels.input_ids
+            input_ids[input_ids == tokenizer.pad_token_id] = -100
+            return input_ids, encoded_labels.attention_mask

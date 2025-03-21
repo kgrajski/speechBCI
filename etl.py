@@ -101,7 +101,7 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir="", show_plots=False):
         )
         x.save(etl_dir)
 
-        var_list_raw = ["spikePow", "tx1"]
+        var_list_raw = ["spikePow", "tx1", "tx2", "tx3", "tx4"]
         var_list_etl = []
         for var_name_raw in var_list_raw:
             var_name = "6v_Inf_" + var_name_raw
