@@ -57,7 +57,7 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
 
-    exp_name = "VQVAE_128_128"
+    exp_name = "VQVAE_256_256"
 
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
@@ -71,8 +71,8 @@ def main():
     os.makedirs(tensorboard_dir, exist_ok=True)
 
     num_epochs = 10
-    embedding_dim = 128
-    num_embeddings = 128
+    embedding_dim = 256
+    num_embeddings = 256
 
     encoder_depth = 8  # Recall convention: B,C,D,H,W; 8 is the depth of the encoder
     depth_step_size = 2  # The stride when making samples from the raw input data.

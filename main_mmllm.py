@@ -17,13 +17,20 @@ Development Reminders:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
     
     TensorBoard Visualization:
-        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_T5/' --port=6006
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_BART/' --port=6006
         # Then open browser to http://localhost:6006/
         
     Monitoring Learning Progres:
+            Look at the predicted text and compare to the original text for training set.
         Go to llm_model_dir and look at the predictions files...
         cat MM_LLM_T5_training_set_epoch_7_predictions.txt  | grep "Predicted (original)" | sort | uniq -c
-    
+            
+            Look at the number of unique words being predicted.
+        cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "original" | sort | uniq -c | \
+            awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
+        cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "standard" | sort | uniq -c | \
+            awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
+
 """
 
 import sys
