@@ -80,7 +80,7 @@ def main():
 
     # Experiment configuration
     exp_name = f"MM_LLM_{model_type.upper()}"
-    vqvae_model_name = "VQVAE_128_128"
+    vqvae_model_name = "VQVAE_256_256"
 
     # Directory setup
     root_dir = "/home/ubuntu"
@@ -94,23 +94,18 @@ def main():
     tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
 
     # Model-specific directories
-    vqvae_model_dir = os.path.join(
-        models_base_dir, vqvae_model_name
-    )  # This will be read only
+    vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # This will be read only
     mmllm_model_dir = os.path.join(models_base_dir, exp_name)  # This will be written to
     os.makedirs(mmllm_model_dir, exist_ok=True)
 
     # TensorBoard directory
-    tensorboard_dir = os.path.join(
-        tensorboard_base_dir, exp_name
-    )  # This will be written to
+    tensorboard_dir = os.path.join(tensorboard_base_dir, exp_name)  # This will be written to
     os.makedirs(tensorboard_dir, exist_ok=True)
 
     # Hyperparameters
-    embedding_dim = 128
-    max_seq_len = (
-        512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
-    )
+    embedding_dim = 256
+    num_embeddings = 256
+    max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
     num_epochs = 10
     learning_rate = 1e-4
     training = True
@@ -121,11 +116,11 @@ def main():
     num_gen_beams = 3
 
     # VQVAE model for embedding preparation
-    vqvae_model = VQVAE()
-    vqvae_model.load_state_dict(
-        torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final.pt"))
-    )
+    vqvae_model = VQVAE(embedding_dim, num_embeddings)
+    vqvae_model.load_state_dict(torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final.pt")))
     padding_vector = get_vqvae_codebook_average(vqvae_model)
+    print(vqvae_model)
+    del vqvae_model
 
     # Load appropriate model and tokenizer based on model type
     if model_type == "t5":

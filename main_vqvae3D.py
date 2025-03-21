@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_128_128"
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_256_256"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -75,7 +75,7 @@ def main():
     num_embeddings = 256
 
     encoder_depth = 8  # Recall convention: B,C,D,H,W; 8 is the depth of the encoder
-    depth_step_size = 2  # The stride when making samples from the raw input data.
+    depth_step_size = 2  # The depth stride when making samples from the raw input data.
 
     learning_rate = 1e-3
 

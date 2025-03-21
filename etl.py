@@ -168,8 +168,13 @@ def main():
     random.seed(42)
 
     raw_data_dir = "/home/ubuntu/speechBCI/data/competitionData/train"
+    
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
+    os.makedirs(etl_dir, exist_ok=True)
+    
     stats_dir = "/home/ubuntu/speechBCI/data/competitionData/stats"
+    os.makedirs(stats_dir, exist_ok=True)
+
 
     mat_files = []
     for root, _, files in os.walk(raw_data_dir):
