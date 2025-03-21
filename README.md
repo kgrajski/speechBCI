@@ -34,11 +34,12 @@ Assuming that one has gained access to the dataset, there are two stages to usin
 * The ETL stage is implemented in the **etl.py**d script.
      This dices and slices and rearranges the raw data based on the Willett paper and data set README.
      This is a necessary step to make sure that processing and display can be mapped backed to physical location of the electrode.
-* The VQ-VAE stage is implemented in the **dev_vqvae.py** script.
+* [DEPRECATED] The VQ-VAE stage is implemented in the **dev_vqvae.py** script.
      This script manages the training, testing, and validation loop for the ETL data.
      The script leverages GPU if available and puts results to TensorBoard
      This was used for 2D exploration.
-* The VQ-VAE 3D stage is implemented in the **main_vqvae3D.py**.  Have refactored code to push the functions needed to run experiments to **utils_vqvae.p**y.
+* The VQ-VAE 3D stage is implemented in the **main_vqvae3D.py**.
+* The Multi-Mode LLM stage is implemented in the **main_mmllm.py**. Currently operating with BART and T5.  Code structured for easy extension.
 
 ## Why The Excitement to Proceed?
 The plot below shows the time series of trained VQ-VAE codebook indexes for a sample sentence from the speechBCI dataset.
@@ -47,7 +48,6 @@ While the indexes have no intrinsic meaning, we are delighted to see what look l
 They appear to be of the duration one likes to see for a neural speech coding.  Next step is to train some LLMs!
 ![Example Plot (HTML)](figs/competitionData/train/t12_2022_05_05_1_0_plot.html)
 ![Example Plot (PNG)](figs/competitionData/train/VQ-VAE-Index-TimeSeries.png)
-
 
 ### Dependencies
 
@@ -84,4 +84,3 @@ This project is licensed under the [NAME HERE] License - see the LICENSE.md file
 
 It is fantastic that Willett lab made available a dataset!
 Additional Acknowledgements and References are in the individual code files.
-
