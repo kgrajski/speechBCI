@@ -50,8 +50,10 @@ from transformers import (
 )
 
 from mmllm.data_utils import get_vqvae_codebook_average
-from mmllm.training_utils import run_exp
 from mmllm.model_utils import create_embedding_model, get_lora_model
+from mmllm.label_utils import LabelAnalyzer
+from mmllm.training_utils import run_exp
+
 from Vqvae_Simple3D import VQVAE
 
 
@@ -80,7 +82,7 @@ def main():
 
     # Experiment configuration
     exp_name = f"MM_LLM_{model_type.upper()}"
-    vqvae_model_name = "VQVAE_256_256"
+    vqvae_model_name = "VQVAE_512_512"
 
     # Directory setup
     root_dir = "/home/ubuntu"
@@ -103,15 +105,15 @@ def main():
     os.makedirs(tensorboard_dir, exist_ok=True)
 
     # Hyperparameters
-    embedding_dim = 256
-    num_embeddings = 256
+    embedding_dim = 512
+    num_embeddings = 512
     max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
     num_epochs = 10
     learning_rate = 1e-4
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 16
+    batch_size = 12
     max_gen_seq_len = 64
     num_gen_beams = 3
 
@@ -151,6 +153,7 @@ def main():
         max_seq_len=max_seq_len,
         padding_vector=padding_vector,
     )
+    
 
     #
     # Recall that we are using competition data.  That study defines the last block in
@@ -159,6 +162,16 @@ def main():
     # use the last block in each session as the withheld validation set.  The remaining
     # data we'll split into the traditional training and test set.
     # Consequently, it makes sense to have a quick
+    
+    # Check the label statistics
+    label_stats = LabelAnalyzer(
+        study_dataset.labels,
+        study_dataset.val_flag,
+        study_dataset.label_masks,
+        study_dataset.attention_masks
+    )
+    label_stats.print_overall_stats()
+    label_stats.print_train_test_comparison()
 
     # Now subset the study data as described above.
     train_test_indices = [

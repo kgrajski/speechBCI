@@ -203,6 +203,7 @@ def run_exp(
     model_dir,
     tensorboard_dir,
     model_type="t5",
+    eval_training_set=False
 ):
     """Train and evaluate model, logging both standardized and original WER scores."""
     writer = SummaryWriter(log_dir=tensorboard_dir)
@@ -239,22 +240,27 @@ def run_exp(
         reset_state()
 
         # Evaluation on training data (for diagnostics)
-        model.eval()
-        test_report_title = f"{exp_name}_training_set_epoch_{epoch}"
-        train_loss_eval, train_std_wer, train_orig_wer = evaluate(
-            model,
-            train_dl,
-            tokenizer,
-            device,
-            max_gen_seq_len,
-            num_gen_beams,
-            model_dir,
-            test_report_title,
-            model_type=model_type,
-        )
-        writer.add_scalar("Loss/train_eval", train_loss_eval, epoch)
-        writer.add_scalar("WER/train_standardized", train_std_wer, epoch)
-        writer.add_scalar("WER/train_original", train_orig_wer, epoch)
+        if eval_training_set:
+            model.eval()
+            test_report_title = f"{exp_name}_training_set_epoch_{epoch}"
+            train_loss_eval, train_std_wer, train_orig_wer = evaluate(
+                model,
+                train_dl,
+                tokenizer,
+                device,
+                max_gen_seq_len,
+                num_gen_beams,
+                model_dir,
+                test_report_title,
+                model_type=model_type,
+            )
+            print(
+                f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss_eval:.4f}, "
+                f"Train WER: {train_std_wer:.4f}/{train_orig_wer:.4f}"
+            )
+            writer.add_scalar("Loss/train_eval", train_loss_eval, epoch)
+            writer.add_scalar("WER/train_standardized", train_std_wer, epoch)
+            writer.add_scalar("WER/train_original", train_orig_wer, epoch)
 
         # Evaluation on test data
         test_report_title = f"{exp_name}_test_set_epoch_{epoch}"
@@ -274,8 +280,8 @@ def run_exp(
         writer.add_scalar("WER/test_original", test_orig_wer, epoch)
 
         print(
-            f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, "
-            f"Test Loss: {test_loss:.4f}, Train WER: {train_std_wer:.4f}/{train_orig_wer:.4f}, Test WER: {test_std_wer:.4f}/{test_orig_wer:.4f}"
+            f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, "
+            f"Test WER: {test_std_wer:.4f}/{test_orig_wer:.4f}"
         )
 
         # Save the best model

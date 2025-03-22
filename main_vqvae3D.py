@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_256_256"
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_512_512"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -57,7 +57,7 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
 
-    exp_name = "VQVAE_256_256"
+    exp_name = "VQVAE_512_512"
 
     etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
     embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
@@ -70,11 +70,11 @@ def main():
     tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
     os.makedirs(tensorboard_dir, exist_ok=True)
 
-    num_epochs = 10
-    embedding_dim = 256
-    num_embeddings = 256
+    num_epochs = 50
+    embedding_dim = 512
+    num_embeddings = 512
 
-    encoder_depth = 8  # Recall convention: B,C,D,H,W; 8 is the depth of the encoder
+    encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
     depth_step_size = 2  # The depth stride when making samples from the raw input data.
 
     learning_rate = 1e-3
