@@ -1,7 +1,7 @@
 """
 This module defines the SpeechBCIDataSet_3D class, a custom PyTorch Dataset
 designed for handling Speech BCI Array Recordings. Each trial forms a time
-series of 2D "images".
+series of multi-channel 2D "images".
 
 Classes:
     SpeechBCIDataSet_3D: A custom PyTorch Dataset for Speech BCI Array Recordings.

@@ -57,34 +57,51 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
 
-    exp_name = "VQVAE_512_512"
+    # Experiment configuration
+    vqvae_model_name = "VQVAE_4C_512_512"
 
-    etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
-    embed_dir = "/home/ubuntu/speechBCI/data/competitionData/embeddings"
+    # Directory setup
+    root_dir = "/home/ubuntu"
+    project_dir = os.path.join(root_dir, "speechBCI")
+    data_dir = os.path.join(project_dir, "data/competitionData")
 
-    model_dir = "/home/ubuntu/speechBCI/data/competitionData/models"
-    model_dir = os.path.join(model_dir, exp_name)
-    os.makedirs(model_dir, exist_ok=True)
+    # Define all data directories using the common root
+    etl_dir = os.path.join(data_dir, "etl") # This data will be read.
+    embed_dir = os.path.join(data_dir, "embeddings")
+    models_base_dir = os.path.join(data_dir, "models")
+    tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
 
-    tensorboard_dir = "/home/ubuntu/speechBCI/data/competitionData/tensorboard"
-    tensorboard_dir = os.path.join(tensorboard_dir, exp_name)
+    # Model-specific directories
+    vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # Write the model
+    os.makedirs(vqvae_model_dir, exist_ok=True)
+    embed_dir = os.path.join(embed_dir, vqvae_model_name)  # Write the embeddings
+    os.makedirs(embed_dir, exist_ok=True)
+
+    # TensorBoard directory
+    tensorboard_dir = os.path.join(tensorboard_base_dir, vqvae_model_name)  # Write log data
     os.makedirs(tensorboard_dir, exist_ok=True)
 
-    num_epochs = 50
+        # Key parameters describing the input data.
+    num_ecog_input_channels = 4
+    encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
+    depth_step_size = 2  # The depth stride when making samples from the raw input data.
+    num_encoder_out_channels = 128
+    
+        # Key parameters determing the VQ model itself
+        # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
     embedding_dim = 512
     num_embeddings = 512
 
-    encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
-    depth_step_size = 2  # The depth stride when making samples from the raw input data.
-
-    learning_rate = 1e-3
-
-    training = True
-    encoding = True
-
+        # Describe how we want to do the training
     test_prop = 0.2
     train_prop = 1 - test_prop
+    num_epochs = 50
     batch_size = 512
+    learning_rate = 1e-3
+    
+        # Indicate whether we are training, embedding, or both
+    training = True
+    encoding = True
 
     #
     # Per Willett, et al. competition data, the last block in each session
@@ -115,12 +132,12 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    model = VQVAE(embedding_dim, num_embeddings).to(device)
+    model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, embedding_dim, num_embeddings).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
 
     if training:
         run_exp(
-            exp_name,
+            vqvae_model_name,
             model,
             train_dl,
             test_dl,
@@ -128,7 +145,7 @@ def main():
             optimizer,
             device,
             num_epochs=num_epochs,
-            model_dir=model_dir,
+            model_dir=vqvae_model_dir,
             show_plots=True,
             tensorboard_dir=tensorboard_dir,
         )
@@ -139,7 +156,7 @@ def main():
         #  Print the model as a refresh and sanity check.
         #
         model.load_state_dict(
-            torch.load(os.path.join(model_dir, exp_name + "_final" + ".pt"))
+            torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final" + ".pt"))
         )
         model.eval()
         print(model)

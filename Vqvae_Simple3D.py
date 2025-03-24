@@ -53,8 +53,8 @@ class VectorQuantizer(nn.Module):
 
     def __init__(
         self,
-        num_embeddings=64,
-        embedding_dim=128,
+        embedding_dim,
+        num_embeddings,
         commitment_cost=0.25,
         decay=0.99,
         epsilon=1e-5,
@@ -142,8 +142,8 @@ class VectorQuantizerEMA(nn.Module):
 
     def __init__(
         self,
-        num_embeddings=64,
-        embedding_dim=64,
+        embedding_dim,
+        num_embeddings,
         commitment_cost=0.25,
         decay=0.99,
         epsilon=1e-5,
@@ -256,9 +256,7 @@ class Encoder(nn.Module):
         padding (int): Zero-padding added to all sides of the input. Default: 0
     """
 
-    def __init__(
-        self, in_channels=2, out_channels=128, kernel_size=2, stride=2, padding=0
-    ):
+    def __init__(self, in_channels, out_channels, kernel_size=2, stride=2, padding=0):
         super(Encoder, self).__init__()
 
         self._conv1 = nn.Sequential(
@@ -327,7 +325,7 @@ class PreVQLayer(nn.Module):
         padding (int): Zero-padding added to all sides of the input. Default: 0
     """
 
-    def __init__(self, embedding_dim, in_channels=128):
+    def __init__(self, in_channels, embedding_dim):
         super(PreVQLayer, self).__init__()
         self._pre_vq_conv = nn.Conv3d(
             in_channels, embedding_dim, kernel_size=2, stride=2, padding=0
@@ -360,7 +358,7 @@ class PostVQLayer(nn.Module):
         padding (int): Zero-padding added to all sides of the input. Default: 0
     """
 
-    def __init__(self, embedding_dim, out_channels=128):
+    def __init__(self, embedding_dim, out_channels):
         super(PostVQLayer, self).__init__()
         self._post_vq_conv = nn.ConvTranspose3d(
             embedding_dim, out_channels, kernel_size=2, stride=2, padding=0
@@ -393,9 +391,7 @@ class Decoder(nn.Module):
         padding (int): Zero-padding added to all sides of the input. Default: 0
     """
 
-    def __init__(
-        self, in_channels=128, out_channels=2, kernel_size=2, stride=2, padding=0
-    ):
+    def __init__(self, in_channels, out_channels, kernel_size=2, stride=2, padding=0):
         super(Decoder, self).__init__()
 
         self._convt1 = nn.Sequential(
@@ -460,16 +456,16 @@ class VQVAE(nn.Module):
     input → encoder → pre_vq → vector_quantizer → post_vq → decoder → output
     """
 
-    def __init__(self, embedding_dim=128, num_embeddings=128):
+    def __init__(self, num_input_channels, num_output_channels, embedding_dim=512, num_embeddings=512):
         super(VQVAE, self).__init__()
-        self._encoder = Encoder()
-        self._pre_vq = PreVQLayer(embedding_dim)
+        self._encoder = Encoder(num_input_channels, num_output_channels)
+        self._pre_vq = PreVQLayer(num_output_channels, embedding_dim)
 
         # Note that for now are using plain vanilla VectorQuantizer
         self._vq_vae = VectorQuantizer(embedding_dim, num_embeddings)
 
-        self._post_vq = PostVQLayer(embedding_dim)
-        self._decoder = Decoder()
+        self._post_vq = PostVQLayer(embedding_dim, num_output_channels)
+        self._decoder = Decoder(num_output_channels, num_input_channels)
 
     def forward(self, x):
         """Forward pass through the entire VQ-VAE model.
