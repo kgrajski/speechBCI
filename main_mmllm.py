@@ -17,7 +17,7 @@ Development Reminders:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
     
     TensorBoard Visualization:
-        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_BART/' --port=6006
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_BART_VQVAE_4C_512_512/' --port=6006
         # Then open browser to http://localhost:6006/
         
     Monitoring Learning Progres:
@@ -81,8 +81,10 @@ def main():
     model_type = "bart"  # Change to 'bart' to use BART instead
 
     # Experiment configuration
-    exp_name = f"MM_LLM_{model_type.upper()}"
-    vqvae_model_name = "VQVAE_512_512"
+    vqvae_model_name = "VQVAE_4C_512_512"
+    exp_name = f"MM_LLM_{model_type.upper()}" + f"_{vqvae_model_name}"
+    print(f"Experiment name: {exp_name}")
+  
 
     # Directory setup
     root_dir = "/home/ubuntu"
@@ -97,6 +99,7 @@ def main():
 
     # Model-specific directories
     vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # This will be read only
+    embed_dir = os.path.join(embed_dir, vqvae_model_name)  # This will be read only
     mmllm_model_dir = os.path.join(models_base_dir, exp_name)  # This will be written to
     os.makedirs(mmllm_model_dir, exist_ok=True)
 
@@ -105,11 +108,15 @@ def main():
     os.makedirs(tensorboard_dir, exist_ok=True)
 
     # Hyperparameters
+        # Need to reference the input data and VQVAE dimensions.  Align with main_vqvae3D.py
+    num_ecog_input_channels = 4
+    num_encoder_out_channels = 128
     embedding_dim = 512
     num_embeddings = 512
+    
     max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
-    num_epochs = 10
-    learning_rate = 1e-4
+    num_epochs = 50
+    learning_rate = 5e-5
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
@@ -118,7 +125,7 @@ def main():
     num_gen_beams = 3
 
     # VQVAE model for embedding preparation
-    vqvae_model = VQVAE(embedding_dim, num_embeddings)
+    vqvae_model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, embedding_dim, num_embeddings)
     vqvae_model.load_state_dict(torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final.pt")))
     padding_vector = get_vqvae_codebook_average(vqvae_model)
     print(vqvae_model)

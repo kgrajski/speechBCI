@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_512_512"
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_4C_512_512"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -83,9 +83,9 @@ def main():
 
         # Key parameters describing the input data.
     num_ecog_input_channels = 4
+    num_encoder_out_channels = 128
     encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
     depth_step_size = 2  # The depth stride when making samples from the raw input data.
-    num_encoder_out_channels = 128
     
         # Key parameters determing the VQ model itself
         # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder

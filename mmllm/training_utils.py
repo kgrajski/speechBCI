@@ -137,7 +137,7 @@ def evaluate(
             total_loss += loss.item()
             steps += 1
 
-            # Generate predictions with English constraints
+            # Generate predictions with constraints (as available and applicable)
             generated_ids = model.generate(
                 inputs_embeds=inputs, attention_mask=attention_mask, **generation_kwargs
             )
@@ -151,11 +151,11 @@ def evaluate(
             gc.collect()
 
     avg_loss = total_loss / steps
-    std_wer, orig_wer = calculate_wer(
+    std_wer, orig_wer, num_uniq_pred_words = calculate_wer(
         all_preds, all_original_texts, tokenizer, model_dir, split_name
     )
 
-    return avg_loss, std_wer, orig_wer
+    return avg_loss, std_wer, orig_wer, num_uniq_pred_words
 
 
 def save_model(model, model_dir, exp_name, suffix="best"):
@@ -243,7 +243,7 @@ def run_exp(
         if eval_training_set:
             model.eval()
             test_report_title = f"{exp_name}_training_set_epoch_{epoch}"
-            train_loss_eval, train_std_wer, train_orig_wer = evaluate(
+            train_loss_eval, train_std_wer, train_orig_wer, train_uniq_pred_words = evaluate(
                 model,
                 train_dl,
                 tokenizer,
@@ -261,10 +261,11 @@ def run_exp(
             writer.add_scalar("Loss/train_eval", train_loss_eval, epoch)
             writer.add_scalar("WER/train_standardized", train_std_wer, epoch)
             writer.add_scalar("WER/train_original", train_orig_wer, epoch)
+            writer.add_scalar("Words/train_uniq_pred_words", train_uniq_pred_words, epoch)
 
         # Evaluation on test data
         test_report_title = f"{exp_name}_test_set_epoch_{epoch}"
-        test_loss, test_std_wer, test_orig_wer = evaluate(
+        test_loss, test_std_wer, test_orig_wer, test_unique_pred_words = evaluate(
             model,
             test_dl,
             tokenizer,
@@ -278,6 +279,7 @@ def run_exp(
         writer.add_scalar("Loss/test", test_loss, epoch)
         writer.add_scalar("WER/test_standardized", test_std_wer, epoch)
         writer.add_scalar("WER/test_original", test_orig_wer, epoch)
+        writer.add_scalar("Words/test_unique_pred_words", test_unique_pred_words, epoch)
 
         print(
             f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, "
@@ -295,7 +297,7 @@ def run_exp(
     # Final validation evaluation
     reset_state()
     test_report_title = f"{exp_name}_val_set_epoch_{epoch}"
-    val_loss, val_wer = evaluate(
+    val_loss, val_std_wer, val_orig_wer, val_unique_pred_words = evaluate(
         model,
         val_dl,
         tokenizer,
@@ -304,9 +306,13 @@ def run_exp(
         num_gen_beams,
         model_dir,
         test_report_title,
+        model_type=model_type,
     )
     print(f"Validation Loss: {val_loss:.4f}, Validation WER: {val_wer:.4f}")
-    writer.add_scalar("Loss/validation", val_loss, 0)
-    writer.add_scalar("WER/validation", val_wer, 0)
+    writer.add_scalar("Loss/validation", val_loss, epoch)
+    writer.add_scalar("WER/validation_standardized", val_std_wer, epoch)
+    writer.add_scalar("WER/validation_original", val_orig_wer, epoch)
+    writer.add_scalar("Words/val_unique_pred_words", val_unique_pred_words, epoch)
+    
     writer.close()
     return model

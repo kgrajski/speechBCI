@@ -84,8 +84,12 @@ def calculate_wer(predictions, original_texts, tokenizer, model_dir, split_name)
         for orig_target, orig_pred in zip(original_texts, decoded_preds)
     ]
     orig_mean_wer = np.mean(orig_wer_scores)
-
-    return std_mean_wer, orig_mean_wer
+    
+    # The variable decoded_preds is a list of a list of strings. Using list
+    # comprehension, find the number of unique words and return as num_uniq_pred_words
+    num_uniq_pred_words = len(set([word for sent in decoded_preds for word in sent.split()]))
+    
+    return std_mean_wer, orig_mean_wer, num_uniq_pred_words
 
 
 def standardize_text(text):
