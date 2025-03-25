@@ -30,6 +30,12 @@ Development Reminders:
             awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
         cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "standard" | sort | uniq -c | \
             awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
+            
+    Screen (in an ssh command line session; haven't tried from VSS terminal)
+    - screen -r speechBCI_training
+    - source .venv/bin/activate
+    - python main_mmllm.py > training_log.txt 2>&1
+    - Press Ctrl+A, then press D to detach from the screen.
 
 """
 

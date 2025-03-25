@@ -29,7 +29,10 @@ from SpeechBCI import ElectrodeArray
 from Sentence import Sentence
 
 
-def block_zscore(flist, etl_dir):
+def block_zscore(
+    flist,
+    etl_dir,
+):
     """
     Calculates global mean and std, then applies Z-scoring to the data.
 
@@ -60,7 +63,14 @@ def block_zscore(flist, etl_dir):
     return global_mean, global_std
 
 
-def etl_blockZ(session_id, mat_data, etl_dir, stats_dir="", show_plots=False):
+def etl_blockZ(
+    session_id,
+    mat_data,
+    etl_dir,
+    stats_dir="",
+    ecog_subset="6vinf",
+    show_plots=False,
+):
     """
     Performs ETL operations on a session.
 
@@ -104,12 +114,20 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir="", show_plots=False):
         var_list_raw = ["spikePow", "tx1", "tx2", "tx3"]
         var_list_etl = []
         for var_name_raw in var_list_raw:
-            var_name = "6v_Inf_" + var_name_raw
+            var_name = ecog_subset + "_" + var_name_raw
             var_list_etl.append(var_name)
-            start_chan = 64
-            end_chan = 128
-            num_rows = 8
-            num_cols = 8
+            if ecog_subset == "6vinf":
+                start_chan = 64
+                end_chan = 128
+                num_rows = 8
+                num_cols = 8
+            elif ecog_subset == "6vall":
+                start_chan = 0
+                end_chan = 128
+                num_rows = 16
+                num_cols = 8
+            else:
+                raise ValueError("Invalid ECoG subset specified")
             x = ElectrodeArray(
                 var_name,
                 session_id,
@@ -143,7 +161,8 @@ def etl_blockZ(session_id, mat_data, etl_dir, stats_dir="", show_plots=False):
 
     if stats_dir:
         zstats = pd.DataFrame(
-            zstats, columns=["block_id", "var_name", "global_mean", "global_sd"]
+            zstats,
+            columns=["block_id", "var_name", "global_mean", "global_sd"],
         )
         pd.set_option("display.float_format", "{:.3f}".format)
         zstats.to_csv(
@@ -166,34 +185,53 @@ def main():
 
     np.random.seed(42)
     random.seed(42)
-
-    raw_data_dir = "/home/ubuntu/speechBCI/data/competitionData/train"
     
-    etl_dir = "/home/ubuntu/speechBCI/data/competitionData/etl"
+    # There are different ways to subset the raw ECOG data.
+    # 6vinf - 6v inferior as B x C x D x 8 x 8
+    # 6vall - 6v superior and 6v inferior sa B x C x D x 16 x 8
+    ecog_subset = "6vall" # Requirement: alphanumeric only no spaces or special characters
+
+    # Directory setup
+    root_dir = "/home/ubuntu"
+    project_dir = os.path.join(root_dir, "speechBCI")
+    data_dir = os.path.join(project_dir, "data/competitionData")
+    
+    # ETL-specific directories
+    raw_data_dir = os.path.join(data_dir, "train") # This will be read only
+    
+    etl_dir = os.path.join(data_dir, "etl", ecog_subset) # This will be written to
     os.makedirs(etl_dir, exist_ok=True)
     
-    stats_dir = "/home/ubuntu/speechBCI/data/competitionData/stats"
+    stats_dir = os.path.join(data_dir, "stats", ecog_subset) # This will be written to
     os.makedirs(stats_dir, exist_ok=True)
-
-
+    
+    # Make a list of the inpur raw data files.
     mat_files = []
     for root, _, files in os.walk(raw_data_dir):
         for file in files:
             if file.endswith(".mat"):
                 mat_files.append(os.path.join(root, file))
 
+    # Initialize counters
     tot_num_sessions = 0
     tot_num_blocks = 0
     tot_num_trials = 0
     tot_time_samples = 0
-
+    
+    # Iterate through the raw data files.
+    # Each file contains data for a multi-trial session in speechBCI world
     for mat_file_path in mat_files:
         try:
             print(f"\nProcessing {mat_file_path}")
             mat_data = scipy.io.loadmat(mat_file_path)
             session_id = os.path.splitext(os.path.basename(mat_file_path))[0]
             num_blocks, num_trials, num_time_samples = etl_blockZ(
-                session_id, mat_data, etl_dir, stats_dir, False
+                session_id,
+                mat_data,
+                etl_dir,
+                stats_dir,
+                ecog_subset,
+                False,
             )
             tot_num_sessions += 1
             tot_num_blocks += num_blocks
