@@ -308,7 +308,10 @@ def run_exp(
         test_report_title,
         model_type=model_type,
     )
-    print(f"Validation Loss: {val_loss:.4f}, Validation WER: {val_wer:.4f}")
+    print(
+        f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {val_loss:.4f}, "
+        f"Train WER: {val_std_wer:.4f}/{val_orig_wer:.4f}"
+    )
     writer.add_scalar("Loss/validation", val_loss, epoch)
     writer.add_scalar("WER/validation_standardized", val_std_wer, epoch)
     writer.add_scalar("WER/validation_original", val_orig_wer, epoch)

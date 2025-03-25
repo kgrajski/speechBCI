@@ -17,7 +17,7 @@ Development Reminders:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
     
     TensorBoard Visualization:
-        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_BART_VQVAE_4C_512_512/' --port=6006
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_BART_VQVAE_4C_512_512/' --port=6008
         # Then open browser to http://localhost:6006/
         
     Monitoring Learning Progres:
@@ -121,8 +121,8 @@ def main():
     num_embeddings = 512
     
     max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
-    num_epochs = 50
-    learning_rate = 5e-5
+    num_epochs = 1000
+    learning_rate = 1e-5
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop

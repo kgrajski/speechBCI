@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_4C_512_512"
+        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/6v_all/VQVAE_4C_16H_8W_512_512/"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -58,7 +58,8 @@ def main():
     torch.manual_seed(torch_seed)
 
     # Experiment configuration
-    vqvae_model_name = "VQVAE_4C_512_512"
+    vqvae_model_name = "VQVAE_4C_16H_8W_512_512"
+    ecog_subset = "6v_all"  # Requirement: alphanumeric only no spaces or special characters
 
     # Directory setup
     root_dir = "/home/ubuntu"
@@ -66,36 +67,34 @@ def main():
     data_dir = os.path.join(project_dir, "data/competitionData")
 
     # Define all data directories using the common root
-    etl_dir = os.path.join(data_dir, "etl") # This data will be read.
-    embed_dir = os.path.join(data_dir, "embeddings")
+    etl_dir = os.path.join(data_dir, "etl", ecog_subset) # This will be read
+    embed_base_dir = os.path.join(data_dir, "embeddings")
     models_base_dir = os.path.join(data_dir, "models")
     tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
 
     # Model-specific directories
+    embed_dir = os.path.join(embed_base_dir, vqvae_model_name)  # Write the embeddings
+    os.makedirs(embed_dir, exist_ok=True)
     vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # Write the model
     os.makedirs(vqvae_model_dir, exist_ok=True)
-    embed_dir = os.path.join(embed_dir, vqvae_model_name)  # Write the embeddings
-    os.makedirs(embed_dir, exist_ok=True)
-
-    # TensorBoard directory
     tensorboard_dir = os.path.join(tensorboard_base_dir, vqvae_model_name)  # Write log data
     os.makedirs(tensorboard_dir, exist_ok=True)
 
         # Key parameters describing the input data.
     num_ecog_input_channels = 4
-    num_encoder_out_channels = 128
+    num_encoder_out_channels = 256
     encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
-    depth_step_size = 2  # The depth stride when making samples from the raw input data.
+    depth_step_size = 4  # The depth stride when making samples from the raw input data.
     
         # Key parameters determing the VQ model itself
         # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
-    embedding_dim = 512
-    num_embeddings = 512
+    embedding_dim = 128
+    num_embeddings = 256
 
         # Describe how we want to do the training
     test_prop = 0.2
     train_prop = 1 - test_prop
-    num_epochs = 50
+    num_epochs = 100
     batch_size = 512
     learning_rate = 1e-3
     
@@ -111,6 +110,7 @@ def main():
     #
     torch.autograd.set_detect_anomaly(True)
     study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth, depth_step_size)
+    
     train_test_indices = [
         i
         for i in range(len(study_dataset.val_flag))
@@ -123,17 +123,39 @@ def main():
     ]
 
     train_test_dataset = Subset(study_dataset, train_test_indices)
-    train_dataset, test_dataset = random_split(
-        train_test_dataset, [train_prop, test_prop]
-    )
+    train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
     val_dataset = Subset(study_dataset, val_indices)
 
-    train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_dl = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    
+    test_dl = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )
+    
+    val_dl = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )
 
-    model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, embedding_dim, num_embeddings).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=False)
+    model = VQVAE(
+        num_ecog_input_channels,
+        num_encoder_out_channels,
+        embedding_dim,
+        num_embeddings,
+    ).to(device)
+    
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+        amsgrad=False,
+    )
 
     if training:
         run_exp(
@@ -151,10 +173,9 @@ def main():
         )
 
     if encoding:
-        #
+        
         # Use the trained model to generate embeddings for the train, test, and validation sets
         #  Print the model as a refresh and sanity check.
-        #
         model.load_state_dict(
             torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final" + ".pt"))
         )

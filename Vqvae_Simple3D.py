@@ -3,26 +3,29 @@
 
 Implementation of a Vector Quantized Variational Autoencoder (VQ-VAE) with 3D convolutional layers.
 
-This module provides a simple implementation of the VQ-VAE architecture that uses 3D convolutional
-layers for processing volumetric data. The implementation includes vector quantization with both
-standard and EMA-based approaches.
+This module provides a comprehensive implementation of the VQ-VAE architecture optimized for
+processing 3D volumetric neural data. The architecture includes 3D convolutional layers for
+spatial feature extraction and vector quantization with both standard and EMA-based codebook updates.
+
+The model is designed to compress 3D neural signals with spatial dimensions of [B, C, D, H, W]
+into discrete latent representations, then reconstruct the original input from these representations.
 
 ACKNOWLEDGEMENTS:
 See Vqvae_Classic2D.py for the acknowledgements.
 
 Classes:
-    VectorQuantizer: A PyTorch module for vector quantization.
-    VectorQuantizerEMA: A PyTorch module for vector quantization with exponential moving average.
-    Encoder: A 3D convolutional encoder for feature extraction.
-    PreVQLayer: A convolutional layer to adjust dimensionality before vector quantization.
-    PostVQLayer: A transposed convolutional layer to adjust dimensionality after vector quantization.
-    Decoder: A 3D convolutional decoder for reconstruction.
-    VQVAE: The complete VQ-VAE model combining all components.
+    VectorQuantizer: Standard vector quantization with straight-through estimator.
+    VectorQuantizerEMA: Vector quantization with exponential moving average codebook updates.
+    Encoder: Progressive 3D convolutional encoder for feature extraction.
+    PreVQLayer: Convolutional layer to prepare features for vector quantization.
+    PostVQLayer: Convolutional layer to adapt quantized features for decoding.
+    Decoder: Progressive 3D transposed convolutional decoder for reconstruction.
+    VQVAE: Complete end-to-end VQ-VAE model combining all components.
 
 Usage example:
-    model = VQVAE()
+    model = VQVAE(num_input_channels=4, num_output_channels=128, embedding_dim=512, num_embeddings=512)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    data = torch.randn(16, 2, 32, 32, 32)  # Example input data (batch, channels, depth, height, width)
+    data = torch.randn(16, 4, 8, 16, 8)  # Example neural data (batch, channels, depth, height, width)
     loss, recon, perplexity = model(data)
     loss.backward()
     optimizer.step()
@@ -32,23 +35,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 class VectorQuantizer(nn.Module):
-    """Vector Quantization layer as described in VQ-VAE paper.
-
-    This layer takes a tensor to be quantized. The channel dimension is used as the space
-    in which to quantize, while all other dimensions are flattened and treated as different
-    examples to quantize.
-
-    For 3D data with shape [B, C, D, H, W], the tensor is first converted to [B, D, H, W, C],
-    then flattened to [B*D*H*W, C] for quantization, and finally reshaped back to the original format.
-
+    """Vector quantization layer implementing discrete codebook lookup.
+    
+    This layer maps continuous input vectors to discrete codes from a learned codebook.
+    It rearranges input tensors to isolate the feature dimension for quantization,
+    then maps each feature vector to the nearest codebook vector.
+    
+    For 3D neural data with shape [B, C, D, H, W], the layer:
+    1. Permutes dimensions to [B, D, H, W, C]
+    2. Flattens spatial dimensions to [B*D*H*W, C]
+    3. Quantizes each vector by finding the nearest codebook entry
+    4. Reshapes back to the original format
+    
+    The implementation uses a straight-through estimator for backpropagation through
+    the non-differentiable quantization operation.
+    
     Args:
-        num_embeddings (int): Size of the codebook (number of embedding vectors). Default: 64
-        embedding_dim (int): Dimension of each embedding vector. Default: 64
-        commitment_cost (float): Weight for the commitment loss. Default: 0.25
-        decay (float): Not used in this class, included for API compatibility. Default: 0.99
-        epsilon (float): Not used in this class, included for API compatibility. Default: 1e-5
+        embedding_dim (int): Dimension of each codebook vector
+        num_embeddings (int): Size of the codebook (number of discrete codes)
+        commitment_cost (float): Weight for the commitment loss term (default: 0.25)
+        decay (float): Unused parameter for API compatibility (default: 0.99)
+        epsilon (float): Unused parameter for API compatibility (default: 1e-5)
     """
 
     def __init__(
@@ -92,8 +100,15 @@ class VectorQuantizer(nn.Module):
 
         # Calculate distances
         distances = (
-            torch.sum(flat_input**2, dim=1, keepdim=True)
-            + torch.sum(self._embedding.weight**2, dim=1)
+            torch.sum(
+                flat_input**2,
+                dim=1,
+                keepdim=True,
+            )
+            + torch.sum(
+                self._embedding.weight**2,
+                dim=1,
+            )
             - 2 * torch.matmul(flat_input, self._embedding.weight.t())
         )
 
@@ -126,18 +141,24 @@ class VectorQuantizer(nn.Module):
 
 
 class VectorQuantizerEMA(nn.Module):
-    """Vector Quantization layer with Exponential Moving Average updates.
-
-    Similar to VectorQuantizer but uses EMA to update the embedding vectors,
-    which can lead to more stable training. The codebook is updated using an
-    exponential moving average of the cluster assignments and embeddings.
-
+    """Vector quantization layer with Exponential Moving Average codebook updates.
+    
+    This implementation achieves more stable training by updating the codebook
+    using EMA rather than gradient descent. The codebook vectors are updated based on
+    an exponential moving average of assigned input vectors.
+    
+    This approach helps prevent codebook collapse (where many codes become unused)
+    and provides smoother convergence, especially with limited training data.
+    
+    The implementation includes Laplace smoothing of cluster sizes to prevent
+    division by zero for rarely-used codebook vectors.
+    
     Args:
-        num_embeddings (int): Size of the codebook (number of embedding vectors). Default: 64
-        embedding_dim (int): Dimension of each embedding vector. Default: 64
-        commitment_cost (float): Weight for the commitment loss. Default: 0.25
-        decay (float): Decay rate for EMA updates. Default: 0.99
-        epsilon (float): Small constant to avoid division by zero. Default: 1e-5
+        embedding_dim (int): Dimension of each codebook vector
+        num_embeddings (int): Size of the codebook (number of discrete codes)
+        commitment_cost (float): Weight for the commitment loss term (default: 0.25)
+        decay (float): EMA decay rate for codebook updates (default: 0.99)
+        epsilon (float): Small constant for numerical stability (default: 1e-5)
     """
 
     def __init__(
@@ -186,8 +207,15 @@ class VectorQuantizerEMA(nn.Module):
 
         # Calculate distances
         distances = (
-            torch.sum(flat_input**2, dim=1, keepdim=True)
-            + torch.sum(self._embedding.weight**2, dim=1)
+            torch.sum(
+                flat_input**2,
+                dim=1,
+                keepdim=True,
+            )
+            + torch.sum(
+                self._embedding.weight**2,
+                dim=1,
+            )
             - 2 * torch.matmul(flat_input, self._embedding.weight.t())
         )
 
@@ -243,57 +271,77 @@ class VectorQuantizerEMA(nn.Module):
 
 
 class Encoder(nn.Module):
-    """3D convolutional encoder for feature extraction.
-
-    Consists of three convolutional blocks, each with batch normalization and ReLU activation.
-    Progressively downsamples the input while increasing the number of channels.
-
+    """Progressive 3D convolutional encoder for neural signal feature extraction.
+    
+    This encoder progressively reduces spatial dimensions while increasing the channel count
+    through a series of strided 3D convolutions with BatchNorm and LeakyReLU activations.
+    
+    The architecture is designed specifically for neural data with initial dimensions
+    [B, C, D, H, W] where typically C=4, D=8, H=16, W=8. The output dimensions are 
+    [B, out_channels, D//8, H//8, W//8].
+    
+    The encoder includes four convolutional stages:
+    1. First stage: Reduces spatial dimensions by factor of 2, increases channels to out_channels//4
+    2. Second stage: Further reduces spatial dimensions, increases channels to out_channels//2
+    3. Third stage: Final spatial reduction, increases channels to out_channels
+    4. Fourth stage: Adjusts height dimension only, maintaining channel count
+    
     Args:
-        in_channels (int): Number of input channels. Default: 2
-        out_channels (int): Number of output channels. Default: 128
-        kernel_size (int): Size of the convolving kernel. Default: 2
-        stride (int): Stride of the convolution. Default: 2
-        padding (int): Zero-padding added to all sides of the input. Default: 0
+        in_channels (int): Number of input channels (e.g., 4 for neural data)
+        out_channels (int): Number of output channels (typically 128 or higher)
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=2, stride=2, padding=0):
+    def __init__(self, in_channels, out_channels):
         super(Encoder, self).__init__()
 
         self._conv1 = nn.Sequential(
             nn.Conv3d(
                 in_channels=in_channels,
-                out_channels=out_channels // 2,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
+                out_channels=out_channels // 4,
+                kernel_size=4,
+                stride=2,
+                padding=1,
             ),
-            nn.BatchNorm3d(out_channels // 2),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(out_channels // 4),
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
         self._conv2 = nn.Sequential(
             nn.Conv3d(
-                in_channels=out_channels // 2,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
+                in_channels=out_channels // 4,
+                out_channels=out_channels // 2,
+                kernel_size=4,
+                stride=2,
+                padding=1,
             ),
-            nn.BatchNorm3d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(out_channels // 2),
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
         self._conv3 = nn.Sequential(
             nn.Conv3d(
-                in_channels=out_channels,
+                in_channels=out_channels // 2,
                 out_channels=out_channels,
-                kernel_size=2,
+                kernel_size=4,
                 stride=2,
                 padding=1,
             ),
             nn.BatchNorm3d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2, inplace=True),
         )
+        
+        self._conv4 = nn.Sequential(
+            nn.Conv3d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=(1, 2, 1),
+                stride=1,
+                padding=0,
+            ),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        
 
     def forward(self, inputs):
         """Encode the input tensor into a latent representation.
@@ -308,27 +356,38 @@ class Encoder(nn.Module):
         x = self._conv1(inputs)
         x = self._conv2(x)
         x = self._conv3(x)
+        x = self._conv4(x)
         return x
 
 
 class PreVQLayer(nn.Module):
-    """Convolutional layer to adjust feature dimensionality before vector quantization.
-
-    This layer reduces the channel dimension to match the embedding dimension
-    required by the vector quantizer.
-
+    """Pre-quantization layer to adapt encoder features for vector quantization.
+    
+    This layer uses a 1×1×1 convolution to adjust the channel dimension from the
+    encoder output to match the required embedding dimension for vector quantization.
+    It acts as a learned projection that maps the high-dimensional feature space
+    to a space better suited for quantization.
+    
+    The spatial dimensions are preserved, while channel count is adjusted.
+    BatchNorm and LeakyReLU help normalize and add non-linearity to the projection.
+    
     Args:
-        in_channels (int): Number of input channels. Default: 128
-        out_channels (int): Number of output channels (embedding dimension). Default: 64
-        kernel_size (int): Size of the convolving kernel. Default: 2
-        stride (int): Stride of the convolution. Default: 2
-        padding (int): Zero-padding added to all sides of the input. Default: 0
+        in_channels (int): Number of input channels from encoder (typically 128)
+        embedding_dim (int): Target dimension for vector quantization (typically 512)
     """
 
     def __init__(self, in_channels, embedding_dim):
         super(PreVQLayer, self).__init__()
-        self._pre_vq_conv = nn.Conv3d(
-            in_channels, embedding_dim, kernel_size=2, stride=2, padding=0
+        self._pre_vq_conv = nn.Sequential(
+            nn.Conv3d(
+                in_channels=in_channels,
+                out_channels=embedding_dim,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+            ),
+            nn.BatchNorm3d(embedding_dim),
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
     def forward(self, inputs):
@@ -345,23 +404,34 @@ class PreVQLayer(nn.Module):
 
 
 class PostVQLayer(nn.Module):
-    """Transposed convolutional layer to adjust feature dimensionality after vector quantization.
-
-    This layer increases the channel dimension from the embedding dimension
-    back to the dimension expected by the decoder.
-
+    """Post-quantization layer to adapt quantized vectors for decoding.
+    
+    After vector quantization, this layer converts the discrete codebook vectors
+    back to the feature space expected by the decoder. It uses a 1×1×1 transposed
+    convolution to expand the embedding dimension back to the decoder's expected
+    input dimension.
+    
+    This layer provides flexibility in designing asymmetric encoder-decoder architectures
+    where the bottleneck dimensions differ from the decoder's working dimensions.
+    
     Args:
-        in_channels (int): Number of input channels (embedding dimension). Default: 64
-        out_channels (int): Number of output channels. Default: 128
-        kernel_size (int): Size of the convolving kernel. Default: 2
-        stride (int): Stride of the convolution. Default: 2
-        padding (int): Zero-padding added to all sides of the input. Default: 0
+        embedding_dim (int): Dimension of quantized vectors (typically 512)
+        out_channels (int): Number of output channels for decoder (typically 128)
     """
 
     def __init__(self, embedding_dim, out_channels):
         super(PostVQLayer, self).__init__()
-        self._post_vq_conv = nn.ConvTranspose3d(
-            embedding_dim, out_channels, kernel_size=2, stride=2, padding=0
+        
+        self._post_vq_conv = nn.Sequential(
+            nn.ConvTranspose3d(
+                in_channels=embedding_dim,
+                out_channels=out_channels,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+            ),
+            nn.BatchNorm3d(out_channels),  # Changed from embedding_dim!
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
     def forward(self, inputs):
@@ -378,56 +448,73 @@ class PostVQLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    """3D convolutional decoder for reconstructing the input.
-
-    Mirror structure to the encoder, using transposed convolutions to upsample
-    the latent representation back to the original input dimensions.
-
+    """Progressive 3D transposed convolutional decoder for signal reconstruction.
+    
+    This decoder mirrors the encoder structure, using transposed convolutions to
+    progressively upsample the spatial dimensions while decreasing the channel count.
+    The goal is to accurately reconstruct the original input from the quantized
+    latent representation.
+    
+    The decoder includes four transposed convolutional stages:
+    1. First stage: Expands height dimension only, preserving channel count
+    2. Second stage: Expands spatial dimensions by factor of 2, reduces channels to in_channels//2
+    3. Third stage: Further expands spatial dimensions, reduces channels to in_channels//4
+    4. Fourth stage: Final expansion to original dimensions, reduces channels to out_channels
+       with Tanh activation to bound output values
+    
     Args:
-        in_channels (int): Number of input channels. Default: 128
-        out_channels (int): Number of output channels (same as original input). Default: 2
-        kernel_size (int): Size of the convolving kernel. Default: 2
-        stride (int): Stride of the convolution. Default: 2
-        padding (int): Zero-padding added to all sides of the input. Default: 0
+        in_channels (int): Number of input channels from post-VQ layer (typically 128)
+        out_channels (int): Number of output channels for reconstruction (typically 4)
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=2, stride=2, padding=0):
+    def __init__(self, in_channels, out_channels):
         super(Decoder, self).__init__()
 
         self._convt1 = nn.Sequential(
             nn.ConvTranspose3d(
                 in_channels=in_channels,
                 out_channels=in_channels,
-                kernel_size=2,
-                stride=2,
-                padding=1,
+                kernel_size=(1, 2, 1),
+                stride=1,
+                padding=0,
             ),
             nn.BatchNorm3d(in_channels),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
         self._convt2 = nn.Sequential(
             nn.ConvTranspose3d(
                 in_channels=in_channels,
                 out_channels=in_channels // 2,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
+                kernel_size=4,
+                stride=2,
+                padding=1,
             ),
             nn.BatchNorm3d(in_channels // 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
         self._convt3 = nn.Sequential(
             nn.ConvTranspose3d(
                 in_channels=in_channels // 2,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
+                out_channels=in_channels // 4,
+                kernel_size=4,
+                stride=2,
+                padding=1,
             ),
-            nn.BatchNorm3d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(in_channels // 4),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+        
+        self._convt4 = nn.Sequential(
+            nn.ConvTranspose3d(
+                in_channels=in_channels // 4,
+                out_channels=out_channels,
+                kernel_size=4,
+                stride=2,
+                padding=1,
+            ),
+            nn.Tanh(),
         )
 
     def forward(self, inputs):
@@ -442,26 +529,44 @@ class Decoder(nn.Module):
         x = self._convt1(inputs)
         x = self._convt2(x)
         x = self._convt3(x)
+        x = self._convt4(x)
         return x
 
 
 class VQVAE(nn.Module):
-    """Vector Quantized Variational Autoencoder with 3D convolutions.
-
-    Combines an encoder, vector quantizer, and decoder to form a complete VQ-VAE model.
-    The model takes volumetric data as input, compresses it into a discrete latent
-    representation, and then reconstructs the input from this representation.
-
-    The architecture flow is:
+    """Complete Vector Quantized Variational Autoencoder for 3D neural data.
+    
+    This class integrates all components into a comprehensive end-to-end model:
+    1. Encoder: Compresses spatial dimensions and extracts features
+    2. PreVQ: Adjusts feature dimensions for quantization
+    3. VQ: Performs vector quantization with codebook learning
+    4. PostVQ: Adjusts quantized vectors for decoding
+    5. Decoder: Reconstructs the original input
+    
+    The model is designed for neural signal processing, particularly for brain-computer
+    interface applications with 3D electrode array recordings.
+    
+    Architecture flow:
     input → encoder → pre_vq → vector_quantizer → post_vq → decoder → output
+    
+    Args:
+        num_input_channels (int): Number of input data channels (typically 4)
+        num_output_channels (int): Number of encoder/decoder hidden channels (typically 128)
+        embedding_dim (int): Dimension of codebook vectors (typically 512)
+        num_embeddings (int): Number of discrete codes in codebook (typically 512)
     """
 
-    def __init__(self, num_input_channels, num_output_channels, embedding_dim=512, num_embeddings=512):
+    def __init__(
+        self,
+        num_input_channels, # Refers to the input data
+        num_output_channels, # Refers to the encoder output
+        embedding_dim, # Refers to the VQ input and output dimensions
+        num_embeddings, # Refers to the number of embeddings in the codebook
+    ):
         super(VQVAE, self).__init__()
         self._encoder = Encoder(num_input_channels, num_output_channels)
         self._pre_vq = PreVQLayer(num_output_channels, embedding_dim)
 
-        # Note that for now are using plain vanilla VectorQuantizer
         self._vq_vae = VectorQuantizer(embedding_dim, num_embeddings)
 
         self._post_vq = PostVQLayer(embedding_dim, num_output_channels)

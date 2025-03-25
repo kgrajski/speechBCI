@@ -51,7 +51,7 @@ class ElectrodeArray:
         trial_id=0,
         xt=None,
         start_chan=0,
-        end_chan=0,
+        end_chan=128,
         num_rows=16,
         num_cols=8,
     ):

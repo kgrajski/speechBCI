@@ -116,18 +116,20 @@ def etl_blockZ(
         for var_name_raw in var_list_raw:
             var_name = ecog_subset + "_" + var_name_raw
             var_list_etl.append(var_name)
-            if ecog_subset == "6vinf":
+
+            if ecog_subset == "6v_inf":
                 start_chan = 64
                 end_chan = 128
                 num_rows = 8
                 num_cols = 8
-            elif ecog_subset == "6vall":
+            elif ecog_subset == "6v_all":
                 start_chan = 0
                 end_chan = 128
                 num_rows = 16
                 num_cols = 8
             else:
                 raise ValueError("Invalid ECoG subset specified")
+            
             x = ElectrodeArray(
                 var_name,
                 session_id,
@@ -164,7 +166,7 @@ def etl_blockZ(
             zstats,
             columns=["block_id", "var_name", "global_mean", "global_sd"],
         )
-        pd.set_option("display.float_format", "{:.3f}".format)
+        pd.set_option("display.float_format", "{:.6f}".format)
         zstats.to_csv(
             os.path.join(stats_dir, session_id + "_zstats.csv"),
             index=False,
@@ -189,7 +191,7 @@ def main():
     # There are different ways to subset the raw ECOG data.
     # 6vinf - 6v inferior as B x C x D x 8 x 8
     # 6vall - 6v superior and 6v inferior sa B x C x D x 16 x 8
-    ecog_subset = "6vall" # Requirement: alphanumeric only no spaces or special characters
+    ecog_subset = "6v_all" # Requirement: xx_xx (assumed by next stage in pipeline)
 
     # Directory setup
     root_dir = "/home/ubuntu"
