@@ -37,26 +37,29 @@ def get_vqvae_codebook_average(model):
     return avg_vector
 
 
-def calculate_wer(predictions, original_texts, tokenizer, model_dir, split_name):
-    """
-    Calculate Word Error Rate between predictions and targets with both standardized and original text.
-
+def calculate_wer(predictions, references, tokenizer, model_dir, name_prefix, already_decoded=False):
+    """Calculate WER between predictions and references.
+    
     Args:
-        predictions: Predicted token IDs
-        original_texts: Original text strings
-        tokenizer: Tokenizer for decoding predictions
-        model_dir: Directory to save prediction outputs
-        split_name: Name of the data split (train/test/val)
-
+        predictions: List of generated text or token IDs
+        references: List of reference texts
+        tokenizer: Tokenizer for any additional processing
+        model_dir: Directory to save prediction reports
+        name_prefix: Prefix for the report filename
+        already_decoded: Whether predictions are already decoded text (True) or token IDs (False)
+        
     Returns:
-        tuple: (standardized_wer, original_wer) - Mean WER scores for both versions
+        tuple: (standardized_wer, original_wer, unique_word_count)
     """
-    # Decode predictions
-    decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
+    # Decode predictions if needed
+    if already_decoded:
+        decoded_preds = predictions
+    else:
+        decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
 
     # Standardize both predictions and original texts
     standardized_preds = [standardize_text(pred) for pred in decoded_preds]
-    standardized_targets = [standardize_text(text) for text in original_texts]
+    standardized_targets = [standardize_text(text) for text in references]
 
     # Save both original and standardized versions to file
     fname = os.path.join(model_dir, f"{split_name}_predictions.txt")

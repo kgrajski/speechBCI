@@ -24,15 +24,16 @@ class BartAdapter(BaseModelAdapter):
         self.input_adapter = self._build_input_adapter()
 
     def _build_input_adapter(self):
-        """
-        Build a deeper adapter for BART that maps from embedding_dim to hidden_size
-        """
+        """Improved adapter based on literature recommendations"""
         return torch.nn.Sequential(
             torch.nn.Linear(self.embedding_dim, self.bart_model.config.d_model * 2),
-            torch.nn.ReLU(),
+            torch.nn.LayerNorm(self.bart_model.config.d_model * 2),  # Add normalization
+            torch.nn.LeakyReLU(0.2),  # Replace ReLU with LeakyReLU
+            torch.nn.Dropout(0.1),    # Add dropout for regularization
             torch.nn.Linear(
                 self.bart_model.config.d_model * 2, self.bart_model.config.d_model
             ),
+            torch.nn.LayerNorm(self.bart_model.config.d_model),  # Final normalization
         )
 
     def forward(self, inputs_embeds, attention_mask, labels=None):

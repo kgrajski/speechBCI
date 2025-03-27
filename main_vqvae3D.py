@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-        tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/6v_all/VQVAE_4C_16H_8W_512_512/"
+    tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQVAE_4C_16H_8W_512_512"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -58,7 +58,7 @@ def main():
     torch.manual_seed(torch_seed)
 
     # Experiment configuration
-    vqvae_model_name = "VQVAE_4C_16H_8W_512_512"
+    vqvae_model_name = "VQ_EMA_VAE_4C_16H_8W_128_256"
     ecog_subset = "6v_all"  # Requirement: alphanumeric only no spaces or special characters
 
     # Directory setup

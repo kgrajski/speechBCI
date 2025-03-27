@@ -8,6 +8,49 @@ import gc
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from mmllm.data_utils import calculate_wer
+from transformers import BartForConditionalGeneration, BartTokenizer
+
+tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+base_model = BartForConditionalGeneration.from_pretrained("facebook/bart-base")
+
+# Process generated text to ensure proper sentence format
+def process_generated_output(text, model_type):
+    """Process a single generated text.
+    
+    Args:
+        text: Decoded text string
+        model_type: Type of model (t5, bart, etc.)
+        
+    Returns:
+        Processed text string
+    """
+    # For BART models, handle sentence tokens and ensure single sentence
+    if model_type.lower() == "bart":
+        # Remove sentence boundary tokens
+        text = text.replace("<sentence>", "").replace("</sentence>", "").strip()
+        
+        # Ensure we have a single sentence with proper ending
+        if "." in text:
+            # Take first sentence and ensure it ends with period
+            text = text.split(".")[0].strip() + "."
+        elif len(text) > 0 and not text.endswith("."):
+            # Add period if missing
+            text = text.strip() + "."
+    
+    return text
+
+def process_generated_texts(texts, model_type):
+    """Process a list of generated texts based on model type.
+    
+    Args:
+        texts: List of decoded text strings
+        model_type: Type of model (t5, bart, etc.)
+        
+    Returns:
+        List of processed texts
+    """
+    # Use list comprehension for cleaner, more functional approach
+    return [process_generated_output(text, model_type) for text in texts]
 
 
 def train_epoch(model, dataloader, optimizer, device):
@@ -90,18 +133,12 @@ def evaluate(
 
     # Set up language constraints based on model type
     generation_kwargs = {
-        "max_length": max_gen_seq_len,
-        "min_length": 2,
-        "num_beams": num_gen_beams,
-        "early_stopping": True,
-        "do_sample": True,
-        "temperature": 0.7,
-        "top_k": 50,
-        "top_p": 0.95,
-        "no_repeat_ngram_size": 2,
-        "repetition_penalty": 1.2,
-        "length_penalty": 1.0,
-        "bad_words_ids": [[0]],
+        "max_length": 30,
+        "min_length": 5,           # Encourage complete sentences
+        "num_beams": 8,            # More beams for better sentences
+        "do_sample": False,        # Start with deterministic generation
+        "length_penalty": 0.8,     # Favor shorter outputs
+        "early_stopping": True
     }
 
     # Add model-specific parameters for English-only generation
@@ -151,8 +188,21 @@ def evaluate(
             gc.collect()
 
     avg_loss = total_loss / steps
+
+    # Decode predictions first
+    decoded_preds = tokenizer.batch_decode(all_preds, skip_special_tokens=True)
+
+    # Post-process the decoded predictions
+    processed_preds = process_generated_texts(decoded_preds, model_type)
+
+    # Use processed predictions for WER calculation
     std_wer, orig_wer, num_uniq_pred_words = calculate_wer(
-        all_preds, all_original_texts, tokenizer, model_dir, split_name
+        processed_preds, 
+        all_original_texts, 
+        tokenizer, 
+        model_dir, 
+        split_name,
+        already_decoded=True  # Key parameter - predictions are already decoded
     )
 
     return avg_loss, std_wer, orig_wer, num_uniq_pred_words
@@ -256,7 +306,8 @@ def run_exp(
             )
             print(
                 f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss_eval:.4f}, "
-                f"Train WER: {train_std_wer:.4f}/{train_orig_wer:.4f}"
+                f"Train WER: {train_std_wer:.4f}/{train_orig_wer:.4f}",
+                f"Unique pred words: {train_uniq_pred_words}",
             )
             writer.add_scalar("Loss/train_eval", train_loss_eval, epoch)
             writer.add_scalar("WER/train_standardized", train_std_wer, epoch)
@@ -283,7 +334,8 @@ def run_exp(
 
         print(
             f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, "
-            f"Test WER: {test_std_wer:.4f}/{test_orig_wer:.4f}"
+            f"Test WER: {test_std_wer:.4f}/{test_orig_wer:.4f}",
+            f"Unique pred words: {test_unique_pred_words}",
         )
 
         # Save the best model
@@ -310,7 +362,8 @@ def run_exp(
     )
     print(
         f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {val_loss:.4f}, "
-        f"Train WER: {val_std_wer:.4f}/{val_orig_wer:.4f}"
+        f"Train WER: {val_std_wer:.4f}/{val_orig_wer:.4f}",
+        f"Unique pred words: {val_unique_pred_words}",
     )
     writer.add_scalar("Loss/validation", val_loss, epoch)
     writer.add_scalar("WER/validation_standardized", val_std_wer, epoch)

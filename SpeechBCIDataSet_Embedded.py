@@ -180,38 +180,37 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
     @staticmethod
     def _pad_label(label, max_seq_len, model_type, tokenizer):
-        """
-        Tokenize and pad label text with model-specific handling.
-
-        Args:
-            label: Text to tokenize
-            max_seq_len: Maximum sequence length
-            model_type: Model type ('t5', 'bart', etc.)
-            tokenizer: HuggingFace tokenizer
-
-        Returns:
-            tuple: (input_ids, attention_mask)
-        """
+        """Tokenize and pad label text with model-specific handling."""
+        # Apply sentence boundary tokens for BART
+        if model_type.lower() == "bart":
+            processed_label = f"<sentence> {label} </sentence>"
+        else:
+            processed_label = label
+        
+        # Tokenize with appropriate parameters
         encoded_labels = tokenizer(
-            label,
+            processed_label,
             padding="max_length",
             max_length=max_seq_len,
             truncation=True,
             return_tensors="pt",
         )
-
-        # Apply model-specific padding token handling
-        # Note: No need for cloning here as this runs once during initialization
+        
+        # Handle padding token IDs based on model type
         if model_type.lower() == "t5":
-            # T5 uses -100 as the padding index for loss calculation
             input_ids = encoded_labels.input_ids
             input_ids[input_ids == tokenizer.pad_token_id] = -100
-            return input_ids, encoded_labels.attention_mask
-        elif model_type.lower() == "bart":
-            # BART uses the regular pad_token_id
-            return encoded_labels.input_ids, encoded_labels.attention_mask
         else:
-            # Default to T5-style padding for unknown models
             input_ids = encoded_labels.input_ids
-            input_ids[input_ids == tokenizer.pad_token_id] = -100
-            return input_ids, encoded_labels.attention_mask
+            
+        return input_ids, encoded_labels.attention_mask
+
+    def preprocess_target_text(self, text, model_type):
+        """Preprocess target text with appropriate sentence markers based on model type."""
+        if model_type == "bart":
+            # For BART: we'll wrap the target text in sentence tags
+            # BART already adds <s> and </s> tokens, but we want sentence-level markers
+            return f"<sentence> {text} </sentence>"
+        else:
+            # For T5 or other models, return unchanged
+            return text

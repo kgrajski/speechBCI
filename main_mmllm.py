@@ -17,7 +17,7 @@ Development Reminders:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
     
     TensorBoard Visualization:
-        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_BART_VQVAE_4C_512_512/' --port=6008
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_T5_VQVAE_4C_16H_8W_128_256_r2/' --port=6008
         # Then open browser to http://localhost:6006/
         
     Monitoring Learning Progres:
@@ -32,10 +32,14 @@ Development Reminders:
             awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
             
     Screen (in an ssh command line session; haven't tried from VSS terminal)
-    - screen -r speechBCI_training
+    - screen -S speechBCI_training
+    - cd /home/ubuntu/speechBCI
     - source .venv/bin/activate
     - python main_mmllm.py > training_log.txt 2>&1
     - Press Ctrl+A, then press D to detach from the screen.
+    - screen -ls
+    - screen -r speechBCI_training
+    - screen -X -S speechBCI_training quit
 
 """
 
@@ -83,22 +87,24 @@ def main():
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
 
+    # ECOG subset
+    ecog_subset = "6v_all"  # Requirement
+    
     # Choose model type: 't5' or 'bart'
-    model_type = "bart"  # Change to 'bart' to use BART instead
+    model_type = "t5"  # Change to 'bart' to use BART instead
 
-    # Experiment configuration
-    vqvae_model_name = "VQVAE_4C_512_512"
-    exp_name = f"MM_LLM_{model_type.upper()}" + f"_{vqvae_model_name}"
+    # Experiment name (composite)
+    vqvae_model_name = "VQVAE_4C_16H_8W_128_256"
+    exp_name = f"MM_LLM_{model_type.upper()}" + f"_{vqvae_model_name}" + f"_r2"
     print(f"Experiment name: {exp_name}")
   
-
     # Directory setup
     root_dir = "/home/ubuntu"
     project_dir = os.path.join(root_dir, "speechBCI")
     data_dir = os.path.join(project_dir, "data/competitionData")
 
     # Define all data directories using the common root
-    etl_dir = os.path.join(data_dir, "etl")  # This will be read only
+    etl_dir = os.path.join(data_dir, "etl", ecog_subset) # This will be read
     embed_dir = os.path.join(data_dir, "embeddings")  # This will be written to
     models_base_dir = os.path.join(data_dir, "models")
     tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
@@ -116,9 +122,9 @@ def main():
     # Hyperparameters
         # Need to reference the input data and VQVAE dimensions.  Align with main_vqvae3D.py
     num_ecog_input_channels = 4
-    num_encoder_out_channels = 128
-    embedding_dim = 512
-    num_embeddings = 512
+    num_encoder_out_channels = 256
+    embedding_dim = 128
+    num_embeddings = 256
     
     max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
     num_epochs = 1000
@@ -126,9 +132,10 @@ def main():
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 12
+    batch_size = 16
     max_gen_seq_len = 64
     num_gen_beams = 3
+    eval_training_set = True
 
     # VQVAE model for embedding preparation
     vqvae_model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, embedding_dim, num_embeddings)
@@ -142,10 +149,13 @@ def main():
         tokenizer = T5Tokenizer.from_pretrained("t5-small", legacy=True)
         base_model = T5ForConditionalGeneration.from_pretrained("t5-small")
     elif model_type == "bart":
-        # Standard BART (not multilingual)
         tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+        # Add sentence boundary tokens
+        special_tokens = {"additional_special_tokens": ["<sentence>", "</sentence>"]}
+        tokenizer.add_special_tokens(special_tokens)
         base_model = BartForConditionalGeneration.from_pretrained("facebook/bart-base")
-        # Make clear we're using standard BART without language codes
+        # Resize model embeddings to match updated tokenizer
+        base_model.resize_token_embeddings(len(tokenizer))
         print("Using standard BART without multilingual support")
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
@@ -238,6 +248,7 @@ def main():
             model_dir=mmllm_model_dir,
             tensorboard_dir=tensorboard_dir,
             model_type=model_type,  # Pass model type to functions
+            eval_training_set=eval_training_set,
         )
 
     end_time = time.perf_counter()
