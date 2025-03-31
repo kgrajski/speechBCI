@@ -11,22 +11,35 @@ class BaseModelAdapter(torch.nn.Module):
     Base adapter class that defines the interface for all model adapters
     """
 
-    def __init__(self, base_model, embedding_dim=64):
+    def __init__(
+        self, 
+        base_model, 
+        embedding_dim=64, 
+        adapter_type="linear",
+        attention_mode="global",
+        window_size=None
+    ):
         """
-        Initialize the base adapter with a model.
+        Initialize the base adapter.
 
         Args:
-            base_model: Base language model
-            embedding_dim: Dimension of input VQVAE embeddings
+            base_model: The base language model
+            embedding_dim: Dimension of input embeddings
+            adapter_type: Type of adapter architecture ('linear', 'lstm', 'conv', 'attention')
+            attention_mode: Type of attention pattern ('global', 'causal', 'local')
+            window_size: Size of attention window for local attention
         """
         super().__init__()
         self.base_model = base_model
         self.embedding_dim = embedding_dim
+        self.adapter_type = adapter_type
+        self.attention_mode = attention_mode
+        self.window_size = window_size
 
     def _build_input_adapter(self):
         """
-        Build the input adapter that maps VQVAE embeddings to model dimensions.
-        Must be implemented by subclasses.
+        Build adapter based on specified adapter_type.
+        This should be implemented by subclasses.
         """
         raise NotImplementedError("Subclasses must implement _build_input_adapter")
 

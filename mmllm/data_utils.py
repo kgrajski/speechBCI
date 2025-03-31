@@ -37,7 +37,7 @@ def get_vqvae_codebook_average(model):
     return avg_vector
 
 
-def calculate_wer(predictions, references, tokenizer, model_dir, name_prefix, already_decoded=False):
+def calculate_wer(predictions, references, tokenizer, model_dir, split_name, already_decoded=False):
     """Calculate WER between predictions and references.
     
     Args:
@@ -66,7 +66,7 @@ def calculate_wer(predictions, references, tokenizer, model_dir, name_prefix, al
     print(f"calculate_wer {split_name} wrote file {fname}")
     with open(fname, "w") as f:
         for orig_target, orig_pred, std_target, std_pred in zip(
-            original_texts, decoded_preds, standardized_targets, standardized_preds
+            references, decoded_preds, standardized_targets, standardized_preds
         ):
             f.write(f"Target (original): {orig_target}\n")
             f.write(f"Target (standardized): {std_target}\n")
@@ -84,7 +84,7 @@ def calculate_wer(predictions, references, tokenizer, model_dir, name_prefix, al
     # Calculate WER using original text
     orig_wer_scores = [
         wer(orig_target, orig_pred)
-        for orig_target, orig_pred in zip(original_texts, decoded_preds)
+        for orig_target, orig_pred in zip(references, decoded_preds)
     ]
     orig_mean_wer = np.mean(orig_wer_scores)
     

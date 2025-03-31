@@ -17,7 +17,7 @@ Development Reminders:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
     
     TensorBoard Visualization:
-        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/MM_LLM_T5_VQVAE_4C_16H_8W_128_256_r2/' --port=6008
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/' --port=6008
         # Then open browser to http://localhost:6006/
         
     Monitoring Learning Progres:
@@ -91,11 +91,18 @@ def main():
     ecog_subset = "6v_all"  # Requirement
     
     # Choose model type: 't5' or 'bart'
-    model_type = "t5"  # Change to 'bart' to use BART instead
+    model_type = "bart"  # Change to 'bart' to use BART instead
+    
+    # Choose adapter type: 'linear', 'lstm', 'conv', 'attention', or 'rnn'
+    adapter_type = "linear"  # Change this to 'rnn' to use the new RNN adapter
 
-    # Experiment name (composite)
+    # Add these after adapter_type
+    attention_mode = "global"  # Options: 'global', 'causal', 'local' 
+    window_size = None  # For local attention window size
+
+    # Experiment name(s) (composite)
     vqvae_model_name = "VQVAE_4C_16H_8W_128_256"
-    exp_name = f"MM_LLM_{model_type.upper()}" + f"_{vqvae_model_name}" + f"_r2"
+    exp_name = f"MM_LLM_{model_type.upper()}" + f"_{adapter_type.upper()}" + f"_{vqvae_model_name}"
     print(f"Experiment name: {exp_name}")
   
     # Directory setup
@@ -127,7 +134,7 @@ def main():
     num_embeddings = 256
     
     max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
-    num_epochs = 1000
+    num_epochs = 5
     learning_rate = 1e-5
     training = True
     test_prop = 0.2
@@ -222,7 +229,12 @@ def main():
 
     # Create MMLLM model with appropriate adapter
     mm_llm = create_embedding_model(
-        model_type=model_type, base_model=lora_base_model, embedding_dim=embedding_dim
+        model_type=model_type, 
+        base_model=lora_base_model, 
+        embedding_dim=embedding_dim,
+        adapter_type=adapter_type,
+        attention_mode=attention_mode,     # Add these
+        window_size=window_size            # parameters
     )
 
     # Display model information
@@ -230,6 +242,17 @@ def main():
 
     # Set up optimizer
     optimizer = torch.optim.AdamW(mm_llm.parameters(), lr=learning_rate)
+
+    print(f"\nExperiment Configuration:")
+    print(f"- Model Type: {model_type}")
+    print(f"- Adapter Type: {adapter_type}")
+    if adapter_type == "attention":
+        print(f"- Attention Mode: {attention_mode}")
+        print(f"- Window Size: {window_size}")
+    print(f"- Learning Rate: {learning_rate}")
+    print(f"- Batch Size: {batch_size}")
+    print(f"- Max Sequence Length: {max_seq_len}")
+    print(f"- Num Epochs: {num_epochs}")
 
     if training:
         # Train and evaluate the model

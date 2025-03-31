@@ -298,9 +298,9 @@ class Encoder(nn.Module):
             nn.Conv3d(
                 in_channels=in_channels,
                 out_channels=out_channels // 4,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=(4, 4, 4),
+                stride=(2, 2, 2),
+                padding=(1, 1, 1),
             ),
             nn.BatchNorm3d(out_channels // 4),
             nn.LeakyReLU(0.2, inplace=True),
@@ -310,9 +310,9 @@ class Encoder(nn.Module):
             nn.Conv3d(
                 in_channels=out_channels // 4,
                 out_channels=out_channels // 2,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=(4, 3, 3),
+                stride=(2, 1, 1),
+                padding=(1, 1, 1),
             ),
             nn.BatchNorm3d(out_channels // 2),
             nn.LeakyReLU(0.2, inplace=True),
@@ -322,26 +322,13 @@ class Encoder(nn.Module):
             nn.Conv3d(
                 in_channels=out_channels // 2,
                 out_channels=out_channels,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=(4, 3, 3),
+                stride=(2, 1, 1),
+                padding=(1, 1, 1),
             ),
             nn.BatchNorm3d(out_channels),
             nn.LeakyReLU(0.2, inplace=True),
-        )
-        
-        self._conv4 = nn.Sequential(
-            nn.Conv3d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=(1, 2, 1),
-                stride=1,
-                padding=0,
-            ),
-            nn.BatchNorm3d(out_channels),
-            nn.LeakyReLU(0.2, inplace=True),
-        )
-        
+        )   
 
     def forward(self, inputs):
         """Encode the input tensor into a latent representation.
@@ -356,7 +343,6 @@ class Encoder(nn.Module):
         x = self._conv1(inputs)
         x = self._conv2(x)
         x = self._conv3(x)
-        x = self._conv4(x)
         return x
 
 
@@ -473,46 +459,34 @@ class Decoder(nn.Module):
         self._convt1 = nn.Sequential(
             nn.ConvTranspose3d(
                 in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=(1, 2, 1),
-                stride=1,
-                padding=0,
-            ),
-            nn.BatchNorm3d(in_channels),
-            nn.LeakyReLU(0.2, inplace=True),
-        )
-
-        self._convt2 = nn.Sequential(
-            nn.ConvTranspose3d(
-                in_channels=in_channels,
                 out_channels=in_channels // 2,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=(4, 3, 3),
+                stride=(2, 1, 1),
+                padding=(1, 1, 1),
             ),
             nn.BatchNorm3d(in_channels // 2),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        self._convt3 = nn.Sequential(
+        self._convt2 = nn.Sequential(
             nn.ConvTranspose3d(
                 in_channels=in_channels // 2,
                 out_channels=in_channels // 4,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=(4, 3, 3),
+                stride=(2, 1, 1),
+                padding=(1, 1, 1),
             ),
             nn.BatchNorm3d(in_channels // 4),
             nn.LeakyReLU(0.2, inplace=True),
         )
-        
-        self._convt4 = nn.Sequential(
+
+        self._convt3 = nn.Sequential(
             nn.ConvTranspose3d(
                 in_channels=in_channels // 4,
                 out_channels=out_channels,
-                kernel_size=4,
-                stride=2,
-                padding=1,
+                kernel_size=(4, 4, 4),
+                stride=(2, 2, 2),
+                padding=(1, 1, 1),
             ),
             nn.Tanh(),
         )
@@ -529,7 +503,6 @@ class Decoder(nn.Module):
         x = self._convt1(inputs)
         x = self._convt2(x)
         x = self._convt3(x)
-        x = self._convt4(x)
         return x
 
 
