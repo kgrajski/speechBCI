@@ -129,8 +129,8 @@ def main():
     # Hyperparameters
         # Need to reference the input data and VQVAE dimensions.  Align with main_vqvae3D.py
     num_ecog_input_channels = 4
-    num_encoder_out_channels = 256
-    embedding_dim = 128
+    num_encoder_out_channels = 128
+    embedding_dim = 64
     num_embeddings = 256
     
     max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).

@@ -11,7 +11,7 @@ Functions:
         nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
 
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
-    tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/VQ_EMA_VAE_4C_16H_8W_128_256"
+    tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/"
     Then open a browser tab to http://localhost:6006/
 """
 
@@ -58,7 +58,7 @@ def main():
     torch.manual_seed(torch_seed)
 
     # Experiment configuration
-    vqvae_model_name = "VQ_VAE_4C_16H_8W_128_256"
+    vqvae_model_name = "VQ_VAE_256_512"
     ecog_subset = "6v_all"  # Requirement: alphanumeric only no spaces or special characters
 
     # Directory setup
@@ -88,13 +88,13 @@ def main():
     
         # Key parameters determing the VQ model itself
         # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
-    embedding_dim = 64
+    embedding_dim = 256
     num_embeddings = 512
 
         # Describe how we want to do the training
     test_prop = 0.2
     train_prop = 1 - test_prop
-    num_epochs = 50
+    num_epochs = 250
     batch_size = 512
     learning_rate = 1e-3
     
