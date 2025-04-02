@@ -99,7 +99,7 @@ def main():
     learning_rate = 1e-3
     
         # Indicate whether we are training, embedding, or both
-    training = True
+    training = False
     encoding = True
 
     #
