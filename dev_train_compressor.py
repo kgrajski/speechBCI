@@ -319,82 +319,52 @@ def compress_embeddings(compressor, embeddings, device='cuda'):
     return compressed_tokens
 
 
-def compress_study_data(compressor, dataset, device, compress_dir):
+def apply_compressor(compressor, data_loader, device, out_dir):
     """
-    Compress all study data embeddings and save them.
+    Compress embeddings and save them.
     
     Args:
         compressor: Pre-trained hierarchical compressor
-        dataset: The dataset containing VQ-VAE embeddings
+        data_loader: Input will be one of train_loader, test_loader, or val_loader
+        out_dir: Directory to save compressed embeddings
         device: Device to run the compressor on
-        compress_dir: Directory to save compressed embeddings
+        out_dir: Directory to save compressed embeddings
     """
-    # Create the subdirectories for train and test compressed data
-    train_dir = os.path.join(compress_dir, "train")
-    test_dir = os.path.join(compress_dir, "test")
-    os.makedirs(train_dir, exist_ok=True)
-    os.makedirs(test_dir, exist_ok=True)
-    
-    # Get the set of unique sample idkeys in the dataset
-    sample_idkeys = set(dataset.sample_idkey)
-    
-    # Statistics for compressed representations
-    max_series_len = 0
-    all_compressed_stats = []
-    
-    # Process each idkey
-    for idkey in tqdm(sample_idkeys, desc="Compressing samples"):
-        # Find all indices for this idkey
-        indices = [i for i in range(len(dataset)) if dataset.sample_idkey[i] == idkey]
-        indices = sorted(indices)  # Ensure the indices are in order
+    os.makedirs(out_dir, exist_ok=True)
+    compressor = compressor.to(device)
+    compressor.eval()
+    with torch.no_grad():
+        # Create progress bar for compression
+        compress_progress = tqdm(
+            total=len(data_loader.dataset), 
+            desc="Compressing",
+            leave=False,
+            position=1
+        )
         
-        # Get the embeddings for this idkey
-        embeddings_list = [dataset[i]["vqvae_embeddings"] for i in indices]
+        for batch in data_loader:
+            # Get list of embeddings (variable length)
+            embeddings_list = batch["vqvae_embeddings"]
+            trial_ids = batch["trial_ids"]
+            
+            for emb, trial_id in zip(embeddings_list, trial_ids):
+                # Add batch dimension and move to device
+                emb = emb.unsqueeze(0).to(device)
+                
+                # Compress the embeddings
+                compressed_tokens = compress_embeddings(compressor, emb, device)
+                
+                # Save compressed tokens
+                save_path = os.path.join(out_dir, f"{trial_id}.pt")
+                torch.save(compressed_tokens.cpu(), save_path)
+                
+                # Update progress bar
+                compress_progress.update(1)
         
-        # Stack them along the time dimension
-        embeddings = torch.stack(embeddings_list, dim=0)
-        
-        # Compress the embeddings
-        compressed = compress_embeddings(compressor, embeddings, device)
-        
-        # Determine the output directory (train or test)
-        output_dir = test_dir if dataset.val_flag[indices[0]] else train_dir
-        
-        # Save the compressed representation
-        filename = os.path.join(output_dir, f"{idkey}.pt")
-        torch.save(compressed, filename)
-        
-        # Collect statistics
-        if len(indices) > max_series_len:
-            max_series_len = len(indices)
-        
-        # Collect stats on compressed tokens for visualization
-        token_stats = torch.mean(compressed, dim=0).cpu().numpy()
-        all_compressed_stats.append(token_stats)
+        # Close progress bar
+        compress_progress.close()
     
-    print(f"Maximum series length: {max_series_len}")
-    
-    # Generate and save visualization of compressed token statistics
-    all_stats = np.stack(all_compressed_stats)
-    
-    # Create a heatmap of token statistics across samples
-    fig = px.imshow(
-        all_stats, 
-        labels=dict(x="Output Dimension", y="Sample Index", color="Value"),
-        title="Compressed Token Statistics Across Samples"
-    )
-    fig.write_html(os.path.join(compress_dir, "compressed_stats.html"))
-    
-    # Create a histogram of mean token values
-    mean_values = all_stats.flatten()
-    fig = px.histogram(
-        mean_values, 
-        title="Distribution of Compressed Token Values",
-        labels={'x': 'Token Value', 'y': 'Count'}
-    )
-    fig.write_html(os.path.join(compress_dir, "token_distribution.html"))
-    
-    print(f"Compression complete. Compressed tokens saved to {compress_dir}")
+    print(f"Compression complete. Compressed tokens saved to {out_dir}")
 
 
 def main():
@@ -461,8 +431,8 @@ def main():
     np.random.seed(seed)
     
     # Indicate whether we are training, embedding, or both
-    training = True
-    compressing = False
+    training = False
+    compressing = True
 
     # Load dataset
     print("Loading dataset...")
@@ -572,19 +542,19 @@ def main():
         compressor.load_state_dict(
             torch.load(os.path.join(model_dir, f"{compressor_name}_best.pt"))
         )
+        
         # Compress study data
-        print("\nCompressing study data...")
-        compress_study_data(
-            compressor=compressor,
-            dataset=dataset,
-            device=device,
-            compress_dir=compress_dir
-        )
+        # Keep in mind how this study handles training, test, and validation data.
+        # See above.
+        out_dir = os.path.join(compress_dir, "train")
+        apply_compressor(compressor, train_loader, device, out_dir)
+        apply_compressor(compressor, test_loader, device, out_dir)
+        out_dir = os.path.join(compress_dir, "test")
+        apply_compressor(compressor, val_loader, device, out_dir)
     
     # Complete
     end_time = time.time()
     print(f"\nTotal runtime: {end_time - start_time:.2f} seconds")
-    print("Training complete!")
     print(f"*** {script_name} - END ***")
 
 
