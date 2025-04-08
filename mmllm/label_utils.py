@@ -90,14 +90,6 @@ class LabelAnalyzer:
             {word: test_stats["words"].count(word) for word in words_unique_to_test}
         ).most_common(20)
 
-        # self.label_masks is a list of boolean tensors, one per label
-        # Use self.label_masks to find the longest embedded label length.
-        # This is useful to help set the value of max_gen_seq_len
-        # for the T5 model.  Do similar for the embedded input data via
-        # attention_masks.
-        max_embedded_label_len = max([mask.sum() for mask in self.label_masks])
-        max_attention_mask_len = max([mask.sum() for mask in self.attention_masks])
-
         label_stats = {
             "train_stats": train_stats,
             "test_stats": test_stats,
@@ -108,9 +100,13 @@ class LabelAnalyzer:
             "top_20_common_words_test": top_20_common_words_test,
             "top_20_unique_train_words": top_20_unique_train_words,
             "top_20_unique_test_words": top_20_unique_test_words,
-            "max_embedded_label_len": max_embedded_label_len,
-            "max_attention_mask_len": max_attention_mask_len,
         }
+        
+        # Only add mask-related stats if masks are provided
+        if self.label_masks is not None and self.attention_masks is not None:
+            label_stats["max_embedded_label_len"] = max([mask.sum() for mask in self.label_masks])
+            label_stats["max_attention_mask_len"] = max([mask.sum() for mask in self.attention_masks])
+        
         return label_stats
 
     @staticmethod
@@ -239,5 +235,7 @@ class LabelAnalyzer:
             )
         )
 
-        print("\nMax Embedded Label Length:", label_stats["max_embedded_label_len"])
-        print("Max Attention Mask Length:", label_stats["max_attention_mask_len"])
+        # Only print mask lengths if they exist in the stats
+        if "max_embedded_label_len" in label_stats:
+            print("\nMax Embedded Label Length:", label_stats["max_embedded_label_len"])
+            print("Max Attention Mask Length:", label_stats["max_attention_mask_len"])

@@ -17,16 +17,16 @@ class LambdaLayer(nn.Module):
 class LSTMAdapter(nn.Module):
     """LSTM-based adapter for temporal sequence processing"""
     
-    def __init__(self, embedding_dim, output_dim):
+    def __init__(self, embed_dim, output_dim):
         super().__init__()
         self.lstm = nn.LSTM(
-            input_size=embedding_dim,
-            hidden_size=embedding_dim,
+            input_size=embed_dim,
+            hidden_size=embed_dim,
             batch_first=True,
             bidirectional=True
         )
         self.projection = nn.Sequential(
-            nn.Linear(embedding_dim*2, output_dim),
+            nn.Linear(embed_dim*2, output_dim),
             nn.LayerNorm(output_dim)
         )
         
@@ -38,14 +38,14 @@ class LSTMAdapter(nn.Module):
 class ConvolutionalAdapter(nn.Module):
     """Temporal convolutional adapter"""
     
-    def __init__(self, embedding_dim, output_dim, kernel_size=3):
+    def __init__(self, embed_dim, output_dim, kernel_size=3):
         super().__init__()
         self.adapter = nn.Sequential(
             # Reshape to [B, C, T]
             LambdaLayer(lambda x: x.transpose(1, 2)),
             # 1D convolution along time dimension
             nn.Conv1d(
-                in_channels=embedding_dim,
+                in_channels=embed_dim,
                 out_channels=output_dim,
                 kernel_size=kernel_size,
                 padding=kernel_size//2
@@ -62,106 +62,168 @@ class ConvolutionalAdapter(nn.Module):
         return self.adapter(x)
 
 class SelfAttentionAdapter(nn.Module):
-    """Self-attention based temporal adapter with configurable attention pattern"""
+    """Multi-block self-attention adapter with configurable attention pattern"""
     
-    def __init__(self, embedding_dim, output_dim, num_heads=4, attention_mode="global", window_size=None):
+    def __init__(
+        self, 
+        embed_dim, 
+        output_dim,
+        attention_mode,
+        window_size,
+        num_heads,
+        num_layers,
+        dropout,
+    ):
+        
         """
+
         Args:
-            embedding_dim: Dimension of input embeddings
+            embed_dim: Dimension of input features per timestep
             output_dim: Dimension of output features
             num_heads: Number of attention heads
+            num_layers: Number of transformer blocks
             attention_mode: Type of attention pattern ('global', 'causal', 'local')
-            window_size: Size of attention window for local attention (None = full sequence)
+            window_size: Size of attention window for local attention
+            num_heads: Number of attention heads
+            num_layers: Number of transformer blocks
+            dropout: Dropout rate
         """
         super().__init__()
-        self.embedding_dim = embedding_dim
+        self.embed_dim = embed_dim
         self.output_dim = output_dim
-        self.attention_mode = attention_mode
-        self.window_size = window_size
         
-        self.self_attn = nn.MultiheadAttention(
-            embed_dim=embedding_dim, 
-            num_heads=num_heads,
-            batch_first=True
-        )
+        # Create multiple transformer blocks
+        self.blocks = nn.ModuleList([
+            TransformerBlock(
+                embed_dim=embed_dim,
+                nhead=num_heads,
+                dropout=dropout,
+                attention_mode=attention_mode,
+                window_size=window_size
+            ) for _ in range(num_layers)
+        ])
         
+        # Output projection
         self.projection = nn.Sequential(
-            nn.Linear(embedding_dim, output_dim),
+            nn.Linear(embed_dim, output_dim),
             nn.LayerNorm(output_dim)
         )
         
+    def forward(self, x):
+        # Pass through each transformer block
+        for block in self.blocks:
+            x = block(x)
+            
+        # Final projection
+        return self.projection(x)
+
+
+class TransformerBlock(nn.Module):
+    """Transformer block with pre-norm architecture and configurable feedforward dimension."""
+    
+    def __init__(self,
+                 embed_dim,
+                 nhead,
+                 dropout,
+                 dim_feedforward=None,  # Allow configurable bottleneck dimension
+                 attention_mode="global",
+                 window_size=None):
+        super().__init__()
+        
+        # Set bottleneck dimension (default to embed_dim // 4)
+        dim_feedforward = dim_feedforward or embed_dim // 4
+        
+        # Pre-norm attention
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=nhead,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Pre-norm feedforward
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.feedforward = nn.Sequential(
+            nn.Linear(embed_dim, dim_feedforward),  # Bottleneck
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, embed_dim),  # Project back
+            nn.Dropout(dropout)
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        self.attention_mode = attention_mode
+        self.window_size = window_size
+        
+    def forward(self, x):
+        # Get attention mask
+        seq_len = x.size(1)
+        attn_mask = self._create_attention_mask(
+            seq_len, self.attention_mode, self.window_size, device=x.device
+        )
+        
+        # Pre-norm + Self-attention + Residual
+        residual = x
+        x_norm = self.norm1(x)
+        attn_output, _ = self.self_attn(
+            query=x_norm, key=x_norm, value=x_norm,
+            attn_mask=attn_mask
+        )
+        x = residual + self.dropout(attn_output)
+        
+        # Pre-norm + Feedforward + Residual
+        residual = x
+        x_norm = self.norm2(x)
+        x = residual + self.dropout(self.feedforward(x_norm))
+        
+        return x
+    
     def _create_attention_mask(self, seq_len, attention_mode, window_size=None, device=None):
-        """Create appropriate attention mask based on specified mode"""
+        """Create appropriate attention mask based on specified mode."""
         if attention_mode == "global":
-            # No mask for global attention
             return None
             
         elif attention_mode == "causal":
-            # Create causal mask
             bool_mask = torch.triu(
                 torch.ones(seq_len, seq_len, device=device), 
                 diagonal=1
             ).bool()
-            # Convert to float mask with -inf for masked positions
             float_mask = torch.zeros_like(bool_mask, dtype=torch.float)
             float_mask.masked_fill_(bool_mask, float('-inf'))
             return float_mask
             
         elif attention_mode == "local" and window_size is not None:
-            # Create local window mask
             bool_mask = torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
             for i in range(seq_len):
                 start = max(0, i - window_size // 2)
                 end = min(seq_len, i + window_size // 2 + 1)
                 bool_mask[i, start:end] = False
-            # Convert to float mask with -inf for masked positions
             float_mask = torch.zeros_like(bool_mask, dtype=torch.float)
             float_mask.masked_fill_(bool_mask, float('-inf'))
             return float_mask
             
         return None
-        
-    def forward(self, x):
-        # x shape: [batch, seq_len, embedding_dim]
-        seq_len = x.size(1)
-        
-        # Create attention mask based on mode, using input tensor's device
-        attn_mask = self._create_attention_mask(
-            seq_len, 
-            self.attention_mode, 
-            self.window_size,
-            device=x.device  # Pass device from input tensor
-        )
-        
-        # Apply self-attention with appropriate mask
-        attn_out, _ = self.self_attn(
-            query=x, 
-            key=x, 
-            value=x, 
-            attn_mask=attn_mask,
-            key_padding_mask=None
-        )
-        
-        return self.projection(attn_out)
+
 
 class RNNAdapter(nn.Module):
     """
-    Standard RNN adapter for processing embedding sequences.
+    Standard RNN adapter for processing feature sequences.
     
     This adapter uses a simple RNN layer followed by a projection to transform
-    input embeddings before passing them to the language model.
+    input features before passing them to the language model.
     """
-    def __init__(self, input_dim, hidden_dim=64, num_layers=2, dropout=0.1):
+    def __init__(self, embed_dim, output_dim, num_layers=2, dropout=0.1):
         super().__init__()
         self.rnn = nn.RNN(
-            input_size=input_dim,
-            hidden_size=hidden_dim,
+            input_size=embed_dim,
+            hidden_size=output_dim,
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0
         )
-        self.projection = nn.Linear(hidden_dim, hidden_dim)
-        self.norm = nn.LayerNorm(hidden_dim)
+        self.projection = nn.Linear(output_dim, output_dim)
+        self.norm = nn.LayerNorm(output_dim)
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, x):

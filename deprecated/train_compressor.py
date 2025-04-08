@@ -4,6 +4,39 @@ Training script for the Hierarchical Attention Compressor.
 This script provides standalone training for the compressor using
 reconstruction loss, which helps stabilize the full system when integrated.
 """
+"""
+Development Reminders:
+    
+    GPU Monitoring:
+        nvidia-smi -l 5  # Updates every 5 seconds
+        nvidia-smi --id=0 --loop=30 --query --display=UTILIZATION
+    
+    TensorBoard Visualization:
+        tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/' --port=6008
+        # Then open browser to http://localhost:6008/
+        
+    Monitoring Learning Progres:
+            Look at the predicted text and compare to the original text for training set.
+        Go to llm_model_dir and look at the predictions files...
+        cat MM_LLM_T5_training_set_epoch_7_predictions.txt  | grep "Predicted (original)" | sort | uniq -c
+            
+            Look at the number of unique words being predicted.
+        cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "original" | sort | uniq -c | \
+            awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
+        cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "standard" | sort | uniq -c | \
+            awk -F':' '{print $2}' | tr ' ' '\n'| sort | uniq | wc
+            
+    Screen (in an ssh command line session; haven't tried from VSS terminal)
+    - screen -S speechBCI_training
+    - cd /home/ubuntu/speechBCI
+    - source .venv/bin/activate
+    - python train_compressor.py > log_train_compressor.txt 2>&1
+    - Press Ctrl+A, then press D to detach from the screen.
+    - screen -ls
+    - screen -r speechBCI_training
+    - screen -X -S speechBCI_training quit
+
+"""
 
 import os
 import time
@@ -61,20 +94,21 @@ def main():
     os.makedirs(compress_dir, exist_ok=True)
     
     # Model configuration
-    input_dim = 256         # Dimension of VQ-VAE embeddings
-    hidden_dim = 256        # Dimension of hidden representations
-    output_dim = 512        # Dimension of output tokens
-    output_tokens = 512     # Number of output tokens
-    spatial_h = 8           # Height of spatial grid
-    spatial_w = 4           # Width of spatial grid
+    input_dim = 256         # Keep same to match VQ-VAE embeddings
+    hidden_dim = 512        # DOUBLED for more expressive internal representations
+    output_dim = 768        # INCREASED for richer token representation
+    output_tokens = 512     # Down from 1024
+    spatial_h = 8           # Keep same spatial dimensions
+    spatial_w = 4           # Keep same spatial dimensions
     
     # Training configuration
-    batch_size = 16         # Batch size for training
-    num_epochs = 50         # Number of training epochs
-    learning_rate = 1e-4    # Learning rate
-    alpha = 0.1             # Weight for diversity loss
-    beta = 0.01             # Weight for regularization loss
+    batch_size = 16         # DOUBLED for better gradient estimates
+    num_epochs = 100        # DOUBLED to allow more training iterations
+    learning_rate = 5e-5    # INCREASED slightly for faster initial learning
+    alpha = 2.0             # INCREASED 5x for stronger diversity emphasis
+    beta = 0.1              # INCREASED 10x for stronger regularization
     test_prop = 0.2         # Proportion of non-validation data for testing
+    patience = 10           # Stop if no improvement for 10 epochs
     
     # Random seed
     seed = 42
@@ -96,8 +130,8 @@ def main():
     
     # Dataset and DataLoader setup
     dataset = SpeechBCIDataSet_Raw(
-        ecog_subset=ecog_subset, 
-        vqvae_model_name=vqvae_model_name
+        embed_dir=embed_dir, 
+        etl_dir=etl_dir
     )
     
     # Split into test and training
@@ -146,7 +180,7 @@ def main():
             output_tokens=output_tokens,
             spatial_shape=[spatial_h, spatial_w],
             max_input_windows=250,
-            num_layers=4,
+            num_layers=2,       # Down from 4
             num_heads=8
         )
         
@@ -166,7 +200,8 @@ def main():
             save_dir=save_dir,
             save_name=compressor_name,
             alpha=alpha,
-            beta=beta
+            beta=beta,
+            patience=patience
         )
         print("Compressor training completed.")
     else:
@@ -179,7 +214,7 @@ def main():
             output_tokens=output_tokens,
             spatial_shape=[spatial_h, spatial_w],
             max_input_windows=250,
-            num_layers=4,
+            num_layers=2,       # Down from 4
             num_heads=8
         )
         compressor.load_state_dict(

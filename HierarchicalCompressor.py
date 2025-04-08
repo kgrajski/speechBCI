@@ -10,10 +10,48 @@ References:
 - Child et al. "Generating Long Sequences with Sparse Transformers" (2019)
 """
 
+"""
+Understanding Token Diversity Loss in Our Model
+What the Diversity Loss Measures
+Our enhanced token diversity loss combines two metrics:
+
+Coverage Loss (70% weight):
+
+Measures what percentage of your token vocabulary is being used
+Range: 0.0 (all tokens used) to 1.0 (only one token used)
+Uniformity Loss (30% weight):
+
+Measures how evenly distributed the token usage is
+Based on entropy of token distribution
+Range: 0.0 (perfectly uniform) to 1.0 (completely skewed)
+
+Expected Behavior During Training
+Unlike perplexity which should increase over time, our diversity loss should decrease as training progresses:
+
+Training Stage	Expected Value	Interpretation
+Initial	0.8-0.95	Model is using very few tokens (mode collapse)
+Mid-training	0.4-0.7	Model is starting to utilize more tokens
+Well-trained	0.1-0.3	Model is using a diverse set of tokens with good distribution
+
+Diagnostic Values to Track
+In TensorBoard, pay attention to these metrics:
+
+token_coverage: Should increase from ~5-10% to 60-80%
+normalized_entropy: Should increase from near 0 to 0.6-0.8
+tokens_used: The raw count should increase steadily
+Warning Signs
+Stuck high (>0.8): Severe mode collapse - model is using very few tokens
+Too low too quickly (<0.1): Might be sacrificing reconstruction quality
+Fluctuating widely: Unstable training, possibly too high learning rate
+Plateauing early: Might need to increase alpha (diversity weight)
+
+"""
+
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 
 class HierarchicalAttentionCompressor(nn.Module):
@@ -92,6 +130,101 @@ class HierarchicalAttentionCompressor(nn.Module):
         
         # Output projection
         self.output_projection = nn.Linear(hidden_dim, output_dim)
+        
+        # Add a projection for reconstruction
+        self.recon_projection = nn.Linear(hidden_dim, input_dim)
+    
+    def initialize_codebook(self):
+        """Initialize a codebook for vector quantization."""
+        # Create a codebook of size [output_tokens, output_dim]
+        codebook = torch.randn(self.output_tokens, self.output_dim) * 0.02
+        self.register_parameter("codebook", nn.Parameter(codebook))
+        
+        # Register buffers for EMA tracking (not parameters)
+        # Using register_buffer properly keeps them with the model across device moves
+        self.register_buffer("ema_count", torch.zeros(self.output_tokens))
+        self.register_buffer("ema_weight", torch.zeros(self.output_tokens, self.output_dim))
+        self.register_buffer("ema_initialized", torch.tensor(0, dtype=torch.bool))
+
+    def quantize_tokens(self, token_embeddings):
+        """
+        Quantize continuous token embeddings to nearest vectors in codebook.
+        """
+        # Initialize codebook if it doesn't exist
+        if not hasattr(self, "codebook"):
+            self.initialize_codebook()
+        
+        # Get device from input
+        device = token_embeddings.device
+        
+        # Don't try to modify the parameter directly - instead create a local copy on the right device
+        codebook = self.codebook.to(device)
+        
+        # Reshape inputs for easier processing
+        batch_size, num_tokens, dim = token_embeddings.shape
+        flat_inputs = token_embeddings.reshape(-1, dim)  # [batch*tokens, dim]
+        
+        # Calculate distances to all codebook vectors
+        # Normalize embeddings for cosine distance
+        norm_inputs = F.normalize(flat_inputs, p=2, dim=1)
+        norm_codebook = F.normalize(codebook, p=2, dim=1)
+        
+        # Compute cosine similarity (higher is closer)
+        similarity = torch.matmul(norm_inputs, norm_codebook.transpose(0, 1))
+        
+        # Get indices of nearest vectors
+        token_indices = torch.argmax(similarity, dim=1)
+        token_indices = token_indices.view(batch_size, num_tokens)
+        
+        # Get the corresponding vectors from the codebook
+        flat_indices = token_indices.reshape(-1)
+        quantized = codebook[flat_indices]
+        quantized = quantized.reshape(batch_size, num_tokens, dim)
+        
+        # Comment out or disable the EMA update call 
+        # self.update_codebook_with_ema(token_indices.view(-1), flat_inputs)
+        
+        return token_indices, quantized
+    
+    def update_codebook_with_ema(self, encodings, flat_inputs, decay=0.99):
+        """Temporarily disabled EMA update to resolve device issues"""
+        # Skip the update entirely during initial debugging
+        return
+    
+    def compute_token_diversity_loss(self, token_indices):
+        """Compute enhanced token diversity loss."""
+        batch_size = token_indices.shape[0]
+        device = token_indices.device
+        
+        # Create histogram of token usage
+        token_usage = torch.zeros(batch_size, self.output_tokens, device=device)
+        for b in range(batch_size):
+            unique_tokens, counts = torch.unique(token_indices[b], return_counts=True)
+            token_usage[b, unique_tokens] = counts.float()
+        
+        # Calculate per-batch token coverage (what % of tokens are used at all)
+        tokens_used = torch.sum(token_usage > 0, dim=1).float()
+        token_coverage = tokens_used / self.output_tokens
+        coverage_loss = 1.0 - token_coverage.mean()
+        
+        # Calculate distribution uniformity using entropy
+        probs = token_usage / (torch.sum(token_usage, dim=1, keepdim=True) + 1e-10)
+        entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=1)
+        max_entropy = torch.log(torch.tensor(self.output_tokens, dtype=torch.float, device=device))
+        uniformity_loss = 1.0 - (entropy / max_entropy).mean()
+        
+        # Combined loss with stronger weight on coverage
+        diversity_loss = 0.7 * coverage_loss + 0.3 * uniformity_loss
+        
+        # Return usage statistics for monitoring
+        usage_stats = {
+            'tokens_used': tokens_used.mean().item(),
+            'token_coverage': token_coverage.mean().item(),
+            'entropy': entropy.mean().item(),
+            'normalized_entropy': (entropy / max_entropy).mean().item()
+        }
+        
+        return diversity_loss, usage_stats
     
     def process_spatial_window(self, window_tokens):
         """
@@ -168,24 +301,30 @@ class HierarchicalAttentionCompressor(nn.Module):
         
         return x, num_windows
     
-    def forward(self, x, with_reconstruction=False):
+    def apply_token_dropout(self, token_indices, quantized_tokens, p=0.1):
+        """Temporarily disabled token dropout"""
+        # Just return the inputs unchanged to bypass this feature
+        return token_indices, quantized_tokens
+    
+    def forward(self, x, with_reconstruction=True):
         """
-        Forward pass with optional reconstruction.
+        Forward pass through the hierarchical compressor.
         
         Args:
-            x: Input tensor of shape [batch, time_windows, features]
-               or [batch, time_windows, channels, height, width]
-               where features = C*H*W (typically 8192 for C=256, H=8, W=4)
-            with_reconstruction: If True, also return reconstructed time windows
+            x: Input tensor of shape [batch_size, time_windows, input_dim*spatial_h*spatial_w]
+            with_reconstruction: Whether to generate reconstruction output
         
         Returns:
-            If with_reconstruction is False:
-                Tensor of shape [batch, output_tokens, output_dim]
-            If with_reconstruction is True:
-                Tuple of (compressed_tokens, reconstructed_windows, num_windows)
-                - compressed_tokens: [batch, output_tokens, output_dim]
-                - reconstructed_windows: [batch, num_windows, input_dim]
-                - num_windows: Number of time windows processed
+            Dictionary containing:
+            - compressed: Quantized tokens [batch_size, output_tokens, output_dim]
+            - continuous: Continuous tokens [batch_size, output_tokens, output_dim]
+            - reconstructed: Reconstructed input (if with_reconstruction=True)
+            - recon_loss: Reconstruction loss (if with_reconstruction=True)
+            - diversity_loss: Diversity loss based on token similarity
+            - enhanced_div_loss: Enhanced diversity loss based on token usage
+            - reg_loss: Regularization loss
+            - token_indices: Indices of selected tokens
+            - token_stats: Statistics about token usage
         """
         # Check and reshape input if it's 5D
         if len(x.shape) == 5:
@@ -208,8 +347,18 @@ class HierarchicalAttentionCompressor(nn.Module):
                     batch_size, 0, self.input_dim,
                     device=x.device, dtype=x.dtype
                 )
-                return empty_tokens, empty_windows, 0
-            return empty_tokens
+                return {
+                    'compressed': empty_tokens,
+                    'continuous': empty_tokens,
+                    'reconstructed': empty_windows,
+                    'recon_loss': None,
+                    'diversity_loss': None,
+                    'enhanced_div_loss': None,
+                    'reg_loss': None,
+                    'token_indices': None,
+                    'token_stats': None
+                }
+            return {'compressed': empty_tokens, 'continuous': empty_tokens}
         
         # Process each time window to get summaries
         time_summaries = []
@@ -232,16 +381,59 @@ class HierarchicalAttentionCompressor(nn.Module):
         attn_weights = F.softmax(scores, dim=-1)
         
         # Compute weighted sum to get output tokens
-        output_tokens = torch.einsum('btn,bnd->btd', attn_weights, temporal_features)
+        intermediate_output = torch.einsum('btn,bnd->btd', attn_weights, temporal_features)
         
         # Project to output dimension
-        output_tokens = self.output_projection(output_tokens)
+        compressed = self.output_projection(intermediate_output)
         
-        # Return with or without reconstruction
+        # Quantize the tokens - get discrete tokens and indices
+        token_indices, quantized_tokens = self.quantize_tokens(compressed)
+        
+        # Apply token dropout during training
+        if self.training:
+            token_indices, quantized_tokens = self.apply_token_dropout(token_indices, quantized_tokens, p=0.15)
+        
+        # Compute enhanced token diversity loss
+        enhanced_div_loss, token_stats = self.compute_token_diversity_loss(token_indices)
+        
+        # Calculate standard diversity loss for comparison
+        tokens = compressed.view(-1, compressed.size(-1))
+        norm_tokens = F.normalize(tokens, p=2, dim=1)
+        cosine_sim = torch.matmul(norm_tokens, norm_tokens.transpose(0, 1))
+        mask = torch.eye(cosine_sim.size(0), device=cosine_sim.device)
+        diversity_loss = (cosine_sim * (1.0 - mask)).mean()
+        
+        # Calculate regularization loss
+        reg_loss = tokens.pow(2).mean()
+        
+        # Handle reconstruction if needed
+        reconstructed = None
+        recon_loss = None
         if with_reconstruction:
-            return output_tokens, temporal_features, num_windows
+            # First compute mean representation across time
+            recon_features = temporal_features.mean(dim=1, keepdim=True)  # [batch, 1, hidden_dim]
+            
+            # Project back to input dimension
+            recon_features = self.recon_projection(recon_features)  # [batch, 1, input_dim]
+            
+            # Expand to match number of windows
+            reconstructed = recon_features.expand(-1, num_windows, -1)  # [batch, num_windows, input_dim]
+            
+            # Now dimensions will match for the loss
+            recon_loss = F.mse_loss(reconstructed, x[:, :num_windows, :self.input_dim], reduction='mean')
         
-        return output_tokens
+        # Return all outputs
+        return {
+            'compressed': quantized_tokens,  # Use quantized tokens as output
+            'continuous': compressed,        # Also return continuous version
+            'reconstructed': reconstructed,
+            'recon_loss': recon_loss,
+            'diversity_loss': diversity_loss,
+            'enhanced_div_loss': enhanced_div_loss,
+            'reg_loss': reg_loss,
+            'token_indices': token_indices,
+            'token_stats': token_stats
+        }
 
 
 class HierarchicalCompressorWithReconstruction(HierarchicalAttentionCompressor):
@@ -299,22 +491,20 @@ class HierarchicalCompressorWithReconstruction(HierarchicalAttentionCompressor):
             with_reconstruction: If True, also return reconstructed time windows
         
         Returns:
-            If with_reconstruction is False:
-                Tensor of shape [batch, output_tokens, output_dim]
-            If with_reconstruction is True:
-                Tuple of (compressed_tokens, reconstructed_windows, num_windows)
+            Dictionary containing compressed tokens and other outputs
         """
-        # Get compressed representation from parent class
-        compressed_tokens, temporal_features, num_windows = super().forward(
-            x, with_reconstruction=True
-        )
+        # Get outputs from parent class (now returns a dictionary)
+        outputs = super().forward(x, with_reconstruction=True)
+        
+        # Extract what we need
+        compressed_tokens = outputs['compressed']
         
         if with_reconstruction:
-            # Apply reconstruction to get back original time windows
-            reconstructed = self.reconstruct(compressed_tokens, num_windows)
-            return compressed_tokens, reconstructed, num_windows
+            # We already have reconstructed outputs from the parent class
+            return outputs
         
-        return compressed_tokens
+        # For backward compatibility with code expecting just compressed tokens
+        return outputs
 
 
 def compute_reconstruction_loss(original_windows, reconstructed_windows, reduction='mean'):

@@ -51,7 +51,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, random_split, Subset  # Added Subset
 
-from SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
+from dev_SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
 from transformers import (
     T5Tokenizer,
     T5ForConditionalGeneration,
@@ -71,7 +71,7 @@ def main():
     """
     Main function to set up the experiment and run it.
     """
-    script_name = "main_mmllm"
+    script_name = "dev_mmllm"
     start_time = time.perf_counter()
     print("*** " + script_name + " - START ***\n")
 
@@ -95,6 +95,9 @@ def main():
     
     # Choose adapter type: 'linear', 'lstm', 'conv', 'attention', or 'rnn'
     adapter_type = "attention"  # Change this to 'rnn' to use the new RNN adapter
+    num_heads = 2 # Number of attention heads for the transformer adapter
+    num_layers = 1 # Number of transformer layers for the transformer adapter
+    dropout = 0.1  # Dropout rate for the transformer adapter
 
     # Add these after adapter_type
     attention_mode = "global"  # Options: 'global', 'causal', 'local' 
@@ -119,7 +122,7 @@ def main():
     # Model-specific directories
     vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # This will be read only
     embed_dir = os.path.join(embed_dir, vqvae_model_name)  # This will be read only
-    mmllm_model_dir = os.path.join(models_base_dir, exp_name)  # This will be written to
+    mmllm_model_dir = os.path.join(models_base_dir, exp_name) 
     os.makedirs(mmllm_model_dir, exist_ok=True)
 
     # TensorBoard directory
@@ -130,25 +133,28 @@ def main():
         # Need to reference the input data and VQVAE dimensions.  Align with main_vqvae3D.py
     num_ecog_input_channels = 4
     num_encoder_out_channels = 128
-    embedding_dim = 256
-    num_embeddings = 512
     
-    max_seq_len = 512  # Padding to get batch dimension uniformity (not LLM requirements, per se).
+    vqvae_embed_dim = 256  # Rename for consistency (was embedding_dim)
+    vqvae_num_embeddings = 512
+    
+    llm_embed_dim = 8192  # vqvae_embed_dim * H * W (which we set in main_vqvae3D.py)
+    
+    max_input_seq_len = 256  # Padding to get batch dimension uniformity (not LLM requirements, per se).
     num_epochs = 5
     learning_rate = 1e-5
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 16
-    max_gen_seq_len = 64
-    num_gen_beams = 3
+    batch_size = 1
+    max_gen_seq_len = 32
+    num_gen_beams = 2
     eval_training_set = True
 
     # VQVAE model for embedding preparation
-    vqvae_model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, embedding_dim, num_embeddings)
+    vqvae_model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, vqvae_embed_dim, vqvae_num_embeddings)
     vqvae_model.load_state_dict(torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final.pt")))
     padding_vector = get_vqvae_codebook_average(vqvae_model)
-    print(vqvae_model)
+    #print(vqvae_model)
     del vqvae_model
 
     # Load appropriate model and tokenizer based on model type
@@ -180,8 +186,8 @@ def main():
         etl_dir=etl_dir,
         tokenizer=tokenizer,
         model_type=model_type,
-        max_seq_len=max_seq_len,
-        padding_vector=padding_vector,
+        max_seq_len=max_input_seq_len,
+        padding_vector=padding_vector,  # padding_vector has dim [vqvae_embed_dim]
     )
     
 
@@ -231,10 +237,14 @@ def main():
     mm_llm = create_embedding_model(
         model_type=model_type, 
         base_model=lora_base_model, 
-        embedding_dim=embedding_dim,
+        embed_dim=llm_embed_dim,  # Rename from embedding_dim to embed_dim
         adapter_type=adapter_type,
-        attention_mode=attention_mode,     # Add these
-        window_size=window_size            # parameters
+        attention_mode=attention_mode,
+        window_size=window_size,
+        total_input_dim=(max_input_seq_len * llm_embed_dim) if adapter_type == "linear" else None,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        dropout=dropout,
     )
 
     # Display model information
@@ -251,7 +261,7 @@ def main():
         print(f"- Window Size: {window_size}")
     print(f"- Learning Rate: {learning_rate}")
     print(f"- Batch Size: {batch_size}")
-    print(f"- Max Sequence Length: {max_seq_len}")
+    print(f"- Max Sequence Length: {max_input_seq_len}")
     print(f"- Num Epochs: {num_epochs}")
 
     if training:

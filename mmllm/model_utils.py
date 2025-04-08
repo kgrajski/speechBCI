@@ -2,10 +2,8 @@
 Model utilities for SpeechBCI multimodal language models
 """
 
-import torch
 from peft import LoraConfig, get_peft_model, TaskType
-import gc
-from mmllm.model_adapters import T5Adapter, BartAdapter
+from .model_adapters.transformer_adapter import TransformerAdapter
 import torch.nn as nn
 
 
@@ -13,106 +11,53 @@ import torch.nn as nn
 def create_embedding_model(
     model_type, 
     base_model, 
-    embedding_dim=64, 
-    adapter_type="linear",
-    attention_mode="global",
-    window_size=None
+    embed_dim,    # Per-timestep feature dimensio
+    adapter_type,
+    attention_mode,
+    window_size,
+    total_input_dim,  # Total flattened input dimension (linear adapter only)
+    num_heads,        # New parameters
+    num_layers,
+    dropout,
 ):
     """
-    Factory function to create an appropriate adapter model based on model type.
+    Factory function to create an appropriate adapter model.
 
     Args:
         model_type (str): Type of model ('t5', 'bart', etc.)
         base_model: The base language model
-        embedding_dim (int): Dimension of input VQVAE embeddings
-        adapter_type (str): Type of adapter architecture ('linear', 'lstm', 'conv', 'attention', 'rnn')
-        attention_mode (str): Type of attention pattern ('global', 'causal', 'local')
+        embed_dim (int): Dimension of features at each timestep
+        adapter_type (str): Type of adapter architecture
+        attention_mode (str): Type of attention pattern
         window_size (int): Size of attention window for local attention
+        seq_length (int, optional): Maximum sequence length
+        total_input_dim (int, optional): Total flattened dimension for linear adapter
+        num_heads (int): Number of attention heads
+        num_layers (int): Number of layers in the adapter
+        dropout (float): Dropout rate for the adapter
 
     Returns:
-        Adapter model for the specified model type
+        TransformerAdapter: The adapter model for the specified model type
     """
-    model_type = model_type.lower()
-
-    if model_type == "t5":
-        return T5Adapter(
-            base_model, 
-            embedding_dim, 
-            adapter_type,
-            attention_mode,
-            window_size
-        )
-    elif model_type == "bart":
-        return BartAdapter(
-            base_model, 
-            embedding_dim, 
-            adapter_type,
-            attention_mode,
-            window_size
-        )
-    else:
-        raise ValueError(f"Unsupported model type: {model_type}")
-
-    # Choose appropriate adapter based on adapter_type
-    if adapter_type == 'linear':
-        # Existing linear adapter code
-        adapter = LinearAdapter(embedding_dim, hidden_dim)
-    elif adapter_type == 'lstm':
-        # Existing LSTM adapter code 
-        adapter = LSTMAdapter(embedding_dim, hidden_dim)
-    elif adapter_type == 'conv':
-        # Existing convolutional adapter code
-        adapter = ConvAdapter(embedding_dim, hidden_dim)
-    elif adapter_type == 'attention':
-        # Existing attention adapter code
-        adapter = AttentionAdapter(embedding_dim, hidden_dim, attention_mode, window_size)
-    elif adapter_type == 'rnn':
-        # New RNN adapter
-        adapter = RNNAdapter(embedding_dim, hidden_dim)
-    else:
-        raise ValueError(f"Unsupported adapter type: {adapter_type}")
-
-
-class RNNAdapter(nn.Module):
-    """
-    Standard RNN adapter for processing embedding sequences.
     
-    This adapter uses a simple RNN layer followed by a projection to transform
-    input embeddings before passing them to the language model.
-    """
-    def __init__(self, embedding_dim, hidden_dim, num_layers=1, dropout=0.1):
-        super().__init__()
-        self.rnn = nn.RNN(
-            input_size=embedding_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0
-        )
-        self.projection = nn.Linear(hidden_dim, hidden_dim)
-        self.norm = nn.LayerNorm(hidden_dim)
-        self.dropout = nn.Dropout(dropout)
-        
-    def forward(self, x):
-        """
-        Forward pass through the RNN adapter.
-        
-        Args:
-            x: Input tensor of shape [batch_size, seq_len, embedding_dim]
-            
-        Returns:
-            Tensor of shape [batch_size, seq_len, hidden_dim]
-        """
-        # Process through RNN
-        output, _ = self.rnn(x)
-        
-        # Apply projection, normalization and dropout
-        output = self.projection(output)
-        output = self.norm(output)
-        output = self.dropout(output)
-        
-        return output
-
+    # Validate the model type
+    supported_models = ['t5', 'bart']
+    model_type = model_type.lower()
+    if model_type not in supported_models:
+        raise ValueError(f"Unsupported model type: {model_type}. Supported types: {supported_models}")
+    
+    # Create adapter with appropriate parameters
+    return TransformerAdapter(
+        base_model=base_model,
+        embed_dim=embed_dim,
+        adapter_type=adapter_type,
+        attention_mode=attention_mode,
+        window_size=window_size,
+        total_input_dim=total_input_dim,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        dropout=dropout
+    )
 
 def get_lora_model(base_model, model_type="t5", r=16, alpha=32, dropout=0.1):
     """
@@ -150,7 +95,3 @@ def get_lora_model(base_model, model_type="t5", r=16, alpha=32, dropout=0.1):
 
     lora_model = get_peft_model(base_model, lora_config)
     return lora_model
-
-
-# For backward compatibility
-CustomEmbeddingT5 = T5Adapter

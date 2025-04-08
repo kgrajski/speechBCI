@@ -100,10 +100,11 @@ class SpeechBCIDataSet_Embedded(Dataset):
             print(f"Generated {len(tmp_samples)} samples for {sub_dir}.")
 
             #
-            # Note: samples is a list of trial tensors, one T x E tensor per trial:
+            # Note: samples is a list of trial tensors, one T x E x H x W tensor per trial:
             #   T is input seqquence length
             #   E is the embedding dimension
-            # For each trial create a new sample tensor that is max_seq_len x E.
+            #   H x W is the number of embeddeing vectors
+            # For each trial create a new sample tensor that is max_seq_len x (E*H*w).
             #       a.  Pad as necessary using padding_vector.
             #               We've made the choice here that the padding_vector is the average
             #               of the codebook vectors passed in as an argument. This keeps
@@ -145,8 +146,8 @@ class SpeechBCIDataSet_Embedded(Dataset):
         samples = []
         labels = []
         val_flag = []
-        # Load each trial's data and labels
         max_input_seq_len = 0
+
         for trial in trial_list:
             trial_data = torch.load(
                 os.path.join(trial_dir, f"{trial}.pt"), weights_only=True
@@ -159,23 +160,34 @@ class SpeechBCIDataSet_Embedded(Dataset):
             if trial_data.shape[0] > max_input_seq_len:
                 max_input_seq_len = trial_data.shape[0]
         print(
-            f"Max input sequence length for trial data: {max_input_seq_len}."
+            f"Generated {len(samples)} samples with max input length {max_input_seq_len}."
         )
         return samples, labels, val_flag
 
     @staticmethod
     def _pad_sample(sample, max_seq_len, padding_vector):
         seq_len = sample.shape[0]
+        h = sample.shape[2]
+        w = sample.shape[3]
         if seq_len > max_seq_len:
             print(
                 f"Warning _pad_sample: sample len {seq_len} > max_seq_len {max_seq_len}."
             )
             seq_len = max_seq_len
-
-            # Create new padded tensor
-        padded_sample = padding_vector.repeat(max_seq_len, 1)
-
-        # copy original data (or truncate)
+            
+        # Sample data is coming in as T x E x H x W
+        # We want to flatten to T x (E*H*W)
+        sample = sample.view(seq_len, -1)
+            
+        # The padding vector is coming in as [E]
+        # 1. First, repeat it H*W times to get a single flattened row
+        flattened_padding = padding_vector.repeat(h * w)  # Shape: [E*H*W]
+        
+        # 2. Create a new tensor filled with the padding value
+        # Use repeat() instead of expand() to actually allocate new memory
+        padded_sample = flattened_padding.unsqueeze(0).repeat(max_seq_len, 1)  # Shape: [max_seq_len, E*H*W]
+        
+        # Copy original data (or truncate)
         copy_len = min(seq_len, max_seq_len)
         padded_sample[:copy_len] = sample[:copy_len]
 

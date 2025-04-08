@@ -4,7 +4,7 @@ BART-specific adapter implementation
 
 import torch
 from torch import nn
-from mmllm.model_adapters.base_adapter import BaseModelAdapter
+from mmllm.deprecated.base_adapter import BaseModelAdapter
 from mmllm.model_adapters.adapter_modules import (
     LSTMAdapter, RNNAdapter,
     ConvolutionalAdapter as ConvAdapter,  # Add alias

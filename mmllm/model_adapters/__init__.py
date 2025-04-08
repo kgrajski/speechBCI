@@ -2,16 +2,32 @@
 Model adapter implementations for different language models
 """
 
-from mmllm.model_adapters.base_adapter import BaseModelAdapter
-from mmllm.model_adapters.t5_adapter import T5Adapter
-from mmllm.model_adapters.bart_adapter import BartAdapter
-from mmllm.model_adapters.adapter_modules import LSTMAdapter, ConvolutionalAdapter, SelfAttentionAdapter
+# Import from deprecated modules if still needed during transition
+from ..deprecated.base_adapter import BaseModelAdapter
+from mmllm.deprecated.t5_adapter import T5Adapter
+from mmllm.deprecated.bart_adapter import BartAdapter
+
+# Import current modules
+from mmllm.model_adapters.adapter_modules import (
+    LSTMAdapter, 
+    ConvolutionalAdapter, 
+    SelfAttentionAdapter,
+    RNNAdapter
+)
+from mmllm.model_adapters.transformer_adapter import TransformerAdapter
 
 __all__ = [
+    # Deprecated adapters
     "BaseModelAdapter",
     "T5Adapter",
     "BartAdapter",
+    
+    # Current adapter modules
     "LSTMAdapter",
-    "ConvolutionalAdapter",    "ConvolutionalAdapter",
-    "SelfAttentionAdapter",    "SelfAttentionAdapter",
+    "ConvolutionalAdapter",
+    "SelfAttentionAdapter",
+    "RNNAdapter",
+    
+    # Unified adapter
+    "TransformerAdapter"
 ]

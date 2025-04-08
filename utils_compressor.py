@@ -6,6 +6,7 @@ the hierarchical compressor model.
 """
 
 import os
+import time
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -47,6 +48,7 @@ def evaluate_compressor(compressor, data_loader, device, alpha=0.1, beta=0.01):
         
     Returns:
         Tuple of (total_loss, reconstruction_loss, diversity_loss)
+        and dictionary of token statistics
     """
     compressor.eval()
     total_loss = 0.0
@@ -54,27 +56,49 @@ def evaluate_compressor(compressor, data_loader, device, alpha=0.1, beta=0.01):
     diversity_loss = 0.0
     total_samples = 0
     
+    # Track token statistics across evaluation
+    token_stats_eval = None
+    token_indices_all = []
+    
     with torch.no_grad():
         for batch in data_loader:
             # Get list of embeddings (variable length)
             embeddings_list = batch["vqvae_embeddings"]
-            batch_size = len(embeddings_list)
             
             # Process each embedding separately
             for emb in embeddings_list:
                 # Add batch dimension and move to device
                 emb = emb.unsqueeze(0).to(device)
                 
-                # Compute loss
-                loss, r_loss, d_loss = compute_compressor_loss(
-                    emb, compressor, alpha=alpha, beta=beta
-                )
+                # Get outputs directly from compressor
+                outputs = compressor(emb, with_reconstruction=True)
+                
+                # Get losses
+                r_loss = outputs['recon_loss']
+                # Use enhanced diversity loss if available
+                d_loss = outputs.get('enhanced_div_loss', outputs['diversity_loss'])
+                reg_loss = outputs['reg_loss']
+                
+                # Calculate total loss
+                loss = r_loss + alpha * d_loss + beta * reg_loss
                 
                 # Update stats
                 total_loss += loss.item()
                 recon_loss += r_loss.item()
                 diversity_loss += d_loss.item()
                 total_samples += 1
+                
+                # Collect token indices if available
+                if 'token_indices' in outputs:
+                    token_indices_all.append(outputs['token_indices'].cpu())
+                
+                # Collect token stats
+                if 'token_stats' in outputs:
+                    if token_stats_eval is None:
+                        token_stats_eval = {k: 0 for k in outputs['token_stats']}
+                    for k, v in outputs['token_stats'].items():
+                        if isinstance(v, (int, float)):
+                            token_stats_eval[k] += v / total_samples
     
     # Calculate averages
     if total_samples > 0:
@@ -82,7 +106,16 @@ def evaluate_compressor(compressor, data_loader, device, alpha=0.1, beta=0.01):
         recon_loss /= total_samples
         diversity_loss /= total_samples
     
-    return total_loss, recon_loss, diversity_loss
+    # Return token usage statistics along with losses
+    stats = {
+        'total_loss': total_loss,
+        'recon_loss': recon_loss,
+        'diversity_loss': diversity_loss,
+        'token_stats': token_stats_eval
+    }
+    
+    # Return the traditional tuple for backward compatibility
+    return total_loss, recon_loss, diversity_loss, stats
 
 
 def train_compressor(
@@ -96,7 +129,8 @@ def train_compressor(
     save_dir=None,
     save_name="compressor",
     alpha=0.1,
-    beta=0.01
+    beta=0.01,
+    patience=10
 ):
     """
     Train the hierarchical compressor with reconstruction loss.
@@ -113,6 +147,7 @@ def train_compressor(
         save_name: Prefix for saved model files
         alpha: Weight for diversity loss
         beta: Weight for regularization loss
+        patience: Number of epochs to wait for improvement before early stopping
         
     Returns:
         Trained compressor
@@ -130,12 +165,22 @@ def train_compressor(
     # Move compressor to device
     compressor = compressor.to(device)
     
-    # Track best test loss
-    best_test_loss = float('inf')
+    # Track best model and early stopping
+    best_model_state = None
+    best_loss = float('inf')
+    epochs_no_improve = 0
+    
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, 
+        min_lr=1e-6, verbose=True
+    )
     
     # Training loop
+    start_training_time = time.time()
+    
     for epoch in range(num_epochs):
-        start_time = time.time()
+        epoch_start_time = time.time()
         
         # Training phase
         compressor.train()
@@ -143,8 +188,9 @@ def train_compressor(
         train_recon_loss = 0.0
         train_diversity_loss = 0.0
         train_count = 0
+        token_stats_epoch = None  # Will hold accumulated token stats
         
-        # Add tqdm for batches only
+        # Add tqdm for batches
         batch_loader = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
         
         for batch in batch_loader:
@@ -159,15 +205,22 @@ def train_compressor(
             batch_loss = 0.0
             batch_recon_loss = 0.0
             batch_div_loss = 0.0
+            batch_indices = []  # Collect token indices for visualization
             
             for emb in embeddings_list:
                 # Add batch dimension and move to device
                 emb = emb.unsqueeze(0).to(device)
                 
-                # Compute loss with batch dimension
-                loss, recon_loss, div_loss = compute_compressor_loss(
-                    emb, compressor, alpha=alpha, beta=beta
-                )
+                # Forward pass with reconstruction and enhanced diversity loss
+                outputs = compressor(emb, with_reconstruction=True)
+                
+                # Get losses
+                recon_loss = outputs['recon_loss']
+                div_loss = outputs.get('enhanced_div_loss', outputs['diversity_loss'])
+                reg_loss = outputs['reg_loss']
+                
+                # Calculate total loss with weights
+                loss = recon_loss + alpha * div_loss + beta * reg_loss
                 
                 # Scale loss by 1/batch_size to simulate batched behavior
                 scaled_loss = loss / batch_size
@@ -179,6 +232,18 @@ def train_compressor(
                 batch_loss += loss.item()
                 batch_recon_loss += recon_loss.item()
                 batch_div_loss += div_loss.item()
+                
+                # Collect token indices if available
+                if 'token_indices' in outputs:
+                    batch_indices.append(outputs['token_indices'].detach().cpu())
+                
+                # Collect token stats for visualization
+                if 'token_stats' in outputs:
+                    if token_stats_epoch is None:
+                        token_stats_epoch = {k: 0 for k in outputs['token_stats']}
+                    for k, v in outputs['token_stats'].items():
+                        if isinstance(v, (int, float)):
+                            token_stats_epoch[k] += v / batch_size
             
             # Take optimizer step after accumulating gradients
             optimizer.step()
@@ -202,13 +267,14 @@ def train_compressor(
         train_diversity_loss /= train_count
         
         # Testing phase (for model selection and monitoring)
-        test_total_loss, test_recon_loss, test_diversity_loss = evaluate_compressor(
+        test_total_loss, test_recon_loss, test_diversity_loss, test_stats = evaluate_compressor(
             compressor, test_loader, device, alpha, beta
         )
         
         # Print progress
-        elapsed_time = time.time() - start_time
-        print(f"Epoch {epoch+1}/{num_epochs} - {elapsed_time:.2f}s")
+        elapsed_time = time.time() - epoch_start_time
+        total_time = time.time() - start_training_time
+        print(f"Epoch {epoch+1}/{num_epochs} - {elapsed_time:.2f}s (Total: {total_time:.2f}s)")
         print(f"  Train Loss: {train_total_loss:.6f} (Recon: {train_recon_loss:.6f}, Div: {train_diversity_loss:.6f})")
         print(f"  Test Loss: {test_total_loss:.6f} (Recon: {test_recon_loss:.6f}, Div: {test_diversity_loss:.6f})")
         
@@ -220,33 +286,43 @@ def train_compressor(
             writer.add_scalar('Loss/test_total', test_total_loss, epoch)
             writer.add_scalar('Loss/test_reconstruction', test_recon_loss, epoch)
             writer.add_scalar('Loss/test_diversity', test_diversity_loss, epoch)
+            
+            # Log token usage statistics if available
+            if token_stats_epoch:
+                for k, v in token_stats_epoch.items():
+                    writer.add_scalar(f'Tokens/{k}', v, epoch)
+                
+                # Every 5 epochs, log token usage histogram
+                if epoch % 5 == 0 and batch_indices:
+                    all_indices = torch.cat([idx.flatten() for idx in batch_indices])
+                    writer.add_histogram('Tokens/usage_distribution', all_indices, epoch)
         
-        # Save best model based on test loss
-        if test_total_loss < best_test_loss and save_dir is not None:
-            best_test_loss = test_total_loss
-            torch.save(
-                compressor.state_dict(),
-                os.path.join(save_dir, f"{save_name}_best.pt")
-            )
-            print(f"  Saved best model with test loss: {best_test_loss:.6f}")
+        # Save best model
+        if test_total_loss < best_loss:
+            best_loss = test_total_loss
+            best_model_state = compressor.state_dict()
+            print(f"  Saving best model (Loss: {best_loss:.6f})")
+            torch.save(best_model_state, os.path.join(save_dir, f"{save_name}_best.pt"))
+            epochs_no_improve = 0  # Reset counter
+        else:
+            epochs_no_improve += 1
+            print(f"  No improvement for {epochs_no_improve} epochs")
         
-        # Save checkpoint
-        if save_dir is not None and (epoch + 1) % 5 == 0:
-            torch.save(
-                compressor.state_dict(),
-                os.path.join(save_dir, f"{save_name}_epoch{epoch+1}.pt")
-            )
-    
-    # Save final model
-    if save_dir is not None:
-        torch.save(
-            compressor.state_dict(),
-            os.path.join(save_dir, f"{save_name}_final.pt")
-        )
+        # Step the scheduler
+        scheduler.step(test_total_loss)
+        
+        # Early stopping check
+        if patience > 0 and epochs_no_improve >= patience:
+            print(f"Early stopping after {epoch+1} epochs without improvement")
+            break
     
     # Close TensorBoard writer
     if writer is not None:
         writer.close()
+    
+    # Load best model
+    if best_model_state is not None:
+        compressor.load_state_dict(best_model_state)
     
     return compressor
 
@@ -419,3 +495,28 @@ def compute_compressor_loss(
     total_loss = recon_loss + alpha * diversity_loss + reg_loss
     
     return total_loss, recon_loss, diversity_loss
+
+
+def compute_token_diversity_loss(token_usage):
+    """
+    Compute token diversity loss based on token usage distribution.
+    Higher perplexity (more uniform distribution) is better.
+    
+    Args:
+        token_usage: Tensor of shape [batch_size, num_tokens]
+            containing counts of each token's usage
+    
+    Returns:
+        Tensor: The negative log perplexity (lower is better)
+    """
+    # Normalize to get probability distribution
+    probs = token_usage / (torch.sum(token_usage, dim=1, keepdim=True) + 1e-10)
+    
+    # Calculate entropy
+    entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=1)
+    
+    # Calculate perplexity (2^entropy)
+    perplexity = torch.exp(entropy)
+    
+    # Return negative log perplexity as loss (lower is better)
+    return -torch.log(perplexity + 1e-10).mean()

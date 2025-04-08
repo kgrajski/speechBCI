@@ -11,6 +11,10 @@ Functions:
 Usage example:
     Run the script from the command line to process all .mat files in the specified directory:
     $ python etl.py
+    
+Reference to the raw data:
+    https://github.com/fwillett/speechBCI
+    https://eval.ai/web/challenges/challenge-page/2099/overview
 """
 
 #
