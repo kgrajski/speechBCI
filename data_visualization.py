@@ -52,7 +52,7 @@ def setup_directories():
     data_dir = os.path.join(project_dir, "data/competitionData")
 
     # VQVAE model used for original embeddings
-    vqvae_model_name = "VQ_VAE_256_512"
+    vqvae_model_name = "VQ_VAE_64_512"
     compressor_name = f"HC_{vqvae_model_name}"
 
     # ECOG subset

@@ -13,6 +13,16 @@ Functions:
     Reminder: To view TensorBoard logs, start TensorBoard on the command line with:
     tensorboard --logdir="/home/ubuntu/speechBCI/data/competitionData/tensorboard/"
     Then open a browser tab to http://localhost:6006/
+    
+    Screen (in an ssh command line session; haven't tried from VSS terminal)
+    - screen -S speechBCI_training
+    - cd /home/ubuntu/speechBCI
+    - source .venv/bin/activate
+    - python dev_train_vqvae.py > training_log.txt 2>&1
+    - Press Ctrl+A, then press D to detach from the screen.
+    - screen -ls
+    - screen -r speechBCI_training
+    - screen -X -S speechBCI_training quit
 """
 
 #
@@ -56,22 +66,27 @@ def main():
     torch_seed = 293487
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
-
-    # Experiment configuration
-    vqvae_model_name = "VQ_VAE_256_512"
-    ecog_subset = "6v_all"  # Requirement: alphanumeric only no spaces or special characters
-
+    
     # Directory setup
     root_dir = "/home/ubuntu"
     project_dir = os.path.join(root_dir, "speechBCI")
     data_dir = os.path.join(project_dir, "data/competitionData")
+    
+        # Key parameters determing the VQ model itself
+        # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
+    embedding_dim = 64
+    num_embeddings = 512
+
+    # Experiment configuration
+    vqvae_model_name = f"VQ_VAE_{embedding_dim}_{num_embeddings}"
+    ecog_subset = "6v_all"  # Requirement: alphanumeric only no spaces or special characters
 
     # Define all data directories using the common root
     etl_dir = os.path.join(data_dir, "etl", ecog_subset) # This will be read
     embed_base_dir = os.path.join(data_dir, "embeddings")
     models_base_dir = os.path.join(data_dir, "models")
     tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
-
+    
     # Model-specific directories
     embed_dir = os.path.join(embed_base_dir, vqvae_model_name)  # Write the embeddings
     os.makedirs(embed_dir, exist_ok=True)
@@ -85,16 +100,11 @@ def main():
     num_encoder_out_channels = 128
     encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
     depth_step_size = 4  # The depth stride when making samples from the raw input data.
-    
-        # Key parameters determing the VQ model itself
-        # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
-    embedding_dim = 256
-    num_embeddings = 512
 
         # Describe how we want to do the training
     test_prop = 0.2
     train_prop = 1 - test_prop
-    num_epochs = 250
+    num_epochs = 10
     batch_size = 512
     learning_rate = 1e-3
     

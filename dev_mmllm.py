@@ -23,7 +23,7 @@ Development Reminders:
     Monitoring Learning Progres:
             Look at the predicted text and compare to the original text for training set.
         Go to llm_model_dir and look at the predictions files...
-        cat MM_LLM_T5_training_set_epoch_7_predictions.txt  | grep "Predicted (original)" | sort | uniq -c
+        cat MM_LLM_BART_ATTENTION_VQ_VAE_64_512_test_set_epoch_9_predictions.txt  | grep "Predicted (original)" | sort | uniq -c
             
             Look at the number of unique words being predicted.
         cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "original" | sort | uniq -c | \
@@ -95,8 +95,8 @@ def main():
     
     # Choose adapter type: 'linear', 'lstm', 'conv', 'attention', or 'rnn'
     adapter_type = "attention"  # Change this to 'rnn' to use the new RNN adapter
-    num_heads = 2 # Number of attention heads for the transformer adapter
-    num_layers = 1 # Number of transformer layers for the transformer adapter
+    num_heads = 8 # Number of attention heads for the transformer adapter
+    num_layers = 2 # Number of transformer layers for the transformer adapter
     dropout = 0.1  # Dropout rate for the transformer adapter
 
     # Add these after adapter_type
@@ -104,7 +104,7 @@ def main():
     window_size = None  # For local attention window size
 
     # Experiment name(s) (composite)
-    vqvae_model_name = "VQ_VAE_256_512"
+    vqvae_model_name = "VQ_VAE_64_512"
     exp_name = f"MM_LLM_{model_type.upper()}" + f"_{adapter_type.upper()}" + f"_{vqvae_model_name}"
     print(f"Experiment name: {exp_name}")
   
@@ -134,21 +134,21 @@ def main():
     num_ecog_input_channels = 4
     num_encoder_out_channels = 128
     
-    vqvae_embed_dim = 256  # Rename for consistency (was embedding_dim)
+    vqvae_embed_dim = 64  # Rename for consistency (was embedding_dim)
     vqvae_num_embeddings = 512
     
-    llm_embed_dim = 8192  # vqvae_embed_dim * H * W (which we set in main_vqvae3D.py)
+    llm_embed_dim = vqvae_embed_dim * 8 * 4  # (which we set in main_vqvae3D.py)
     
-    max_input_seq_len = 256  # Padding to get batch dimension uniformity (not LLM requirements, per se).
-    num_epochs = 5
+    max_input_seq_len = 224  # Padding to get batch dimension uniformity (not LLM requirements, per se).
+    num_epochs = 20
     learning_rate = 1e-5
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 1
+    batch_size = 16
     max_gen_seq_len = 32
     num_gen_beams = 2
-    eval_training_set = True
+    eval_training_set = False
 
     # VQVAE model for embedding preparation
     vqvae_model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, vqvae_embed_dim, vqvae_num_embeddings)

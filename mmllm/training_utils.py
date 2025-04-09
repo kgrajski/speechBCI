@@ -226,9 +226,11 @@ def save_model(model, model_dir, exp_name, suffix="best"):
         os.makedirs(lora_path, exist_ok=True)
         getattr(model, base_model_attr).save_pretrained(lora_path)
         
-        # Save adapter separately
-        adapter_path = os.path.join(model_dir, f"{exp_name}_{suffix}_adapter.pt")
-        torch.save(model.input_adapter.state_dict(), adapter_path)
+        # Save adapter separately if it exists
+        if hasattr(model, "input_adapter"):
+            adapter_path = os.path.join(model_dir, f"{exp_name}_{suffix}_adapter.pt")
+            torch.save(model.input_adapter.state_dict(), adapter_path)
+            print(f"Saved adapter to {adapter_path}")
         
         print(f"Saved {model_type} model with PEFT/LoRA to {lora_path}")
     else:

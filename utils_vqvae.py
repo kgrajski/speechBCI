@@ -190,13 +190,6 @@ def run_exp(
             f"Perplexity: {perplexity.item()}",
         )
 
-        if model_dir is not None:
-            os.makedirs(model_dir, exist_ok=True)
-            torch.save(
-                model.state_dict(),
-                os.path.join(model_dir, exp_name + "_" + str(iepoch) + ".pt"),
-            )
-
     data_recon, vq_loss, perplexity = test(val_dl, model, device)
     writer.add_scalar("loss/val/reconstruction", data_recon.item(), iepoch)
     writer.add_scalar("loss/val/quantization", vq_loss.item(), iepoch)
