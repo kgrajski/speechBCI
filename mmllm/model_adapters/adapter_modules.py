@@ -1,9 +1,11 @@
 """
 Adapter module implementations for various temporal architectures
+Each adapter transforms input features to output embeddings without knowledge of the surrounding system
 """
 
 import torch
 import torch.nn as nn
+
 
 class LambdaLayer(nn.Module):
     """Simple Lambda layer for functional transformations"""
@@ -14,19 +16,47 @@ class LambdaLayer(nn.Module):
     def forward(self, x):
         return self.lambd(x)
 
-class LSTMAdapter(nn.Module):
-    """LSTM-based adapter for temporal sequence processing"""
+
+class LinearAdapter(nn.Module):
+    """Linear projection adapter
     
-    def __init__(self, embed_dim, output_dim):
+    Simple linear transformation from input dimensions to output dimensions
+    """
+    
+    def __init__(self, input_dim, output_dim):
+        """
+        Args:
+            input_dim: Dimension of input features
+            output_dim: Dimension of output features
+        """
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        
+    def forward(self, x):
+        return self.linear(x)
+    
+    
+class LSTMAdapter(nn.Module):
+    """LSTM-based adapter for temporal sequence processing
+    
+    Processes temporal sequences through bidirectional LSTM and projects to output dimension
+    """
+    
+    def __init__(self, input_dim, output_dim):
+        """
+        Args:
+            input_dim: Dimension of input features per timestep
+            output_dim: Dimension of output features per timestep
+        """
         super().__init__()
         self.lstm = nn.LSTM(
-            input_size=embed_dim,
-            hidden_size=embed_dim,
+            input_size=input_dim,
+            hidden_size=input_dim,
             batch_first=True,
             bidirectional=True
         )
         self.projection = nn.Sequential(
-            nn.Linear(embed_dim*2, output_dim),
+            nn.Linear(input_dim*2, output_dim),
             nn.LayerNorm(output_dim)
         )
         
@@ -35,17 +65,27 @@ class LSTMAdapter(nn.Module):
         outputs, _ = self.lstm(x)
         return self.projection(outputs)
 
+
 class ConvolutionalAdapter(nn.Module):
-    """Temporal convolutional adapter"""
+    """Temporal convolutional adapter
     
-    def __init__(self, embed_dim, output_dim, kernel_size=3):
+    Processes sequence with 1D convolution along time dimension
+    """
+    
+    def __init__(self, input_dim, output_dim, kernel_size=3):
+        """
+        Args:
+            input_dim: Dimension of input features per timestep
+            output_dim: Dimension of output features per timestep
+            kernel_size: Size of convolution kernel
+        """
         super().__init__()
         self.adapter = nn.Sequential(
             # Reshape to [B, C, T]
             LambdaLayer(lambda x: x.transpose(1, 2)),
             # 1D convolution along time dimension
             nn.Conv1d(
-                in_channels=embed_dim,
+                in_channels=input_dim,
                 out_channels=output_dim,
                 kernel_size=kernel_size,
                 padding=kernel_size//2
@@ -61,12 +101,16 @@ class ConvolutionalAdapter(nn.Module):
         # inherit from input
         return self.adapter(x)
 
+
 class SelfAttentionAdapter(nn.Module):
-    """Multi-block self-attention adapter with configurable attention pattern"""
+    """Multi-block self-attention adapter with configurable attention pattern
+    
+    Processes sequences through multiple transformer blocks and projects to output dimension
+    """
     
     def __init__(
         self, 
-        embed_dim, 
+        input_dim, 
         output_dim,
         attention_mode,
         window_size,
@@ -74,14 +118,10 @@ class SelfAttentionAdapter(nn.Module):
         num_layers,
         dropout,
     ):
-        
         """
-
         Args:
-            embed_dim: Dimension of input features per timestep
-            output_dim: Dimension of output features
-            num_heads: Number of attention heads
-            num_layers: Number of transformer blocks
+            input_dim: Dimension of input features per timestep
+            output_dim: Dimension of output features per timestep
             attention_mode: Type of attention pattern ('global', 'causal', 'local')
             window_size: Size of attention window for local attention
             num_heads: Number of attention heads
@@ -89,13 +129,13 @@ class SelfAttentionAdapter(nn.Module):
             dropout: Dropout rate
         """
         super().__init__()
-        self.embed_dim = embed_dim
+        self.input_dim = input_dim
         self.output_dim = output_dim
         
         # Create multiple transformer blocks
         self.blocks = nn.ModuleList([
             TransformerBlock(
-                embed_dim=embed_dim,
+                embed_dim=input_dim,
                 nhead=num_heads,
                 dropout=dropout,
                 attention_mode=attention_mode,
@@ -105,7 +145,7 @@ class SelfAttentionAdapter(nn.Module):
         
         # Output projection
         self.projection = nn.Sequential(
-            nn.Linear(embed_dim, output_dim),
+            nn.Linear(input_dim, output_dim),
             nn.LayerNorm(output_dim)
         )
         
@@ -116,6 +156,46 @@ class SelfAttentionAdapter(nn.Module):
             
         # Final projection
         return self.projection(x)
+    
+    def get_diagnostic_data(self, x):
+        """
+        Return diagnostic data about the adapter's operation
+        
+        Args:
+            x: Input tensor
+            
+        Returns:
+            tuple: (output tensor, diagnostic data dictionary)
+        """
+        diagnostic_data = {
+            'input_shape': x.shape,
+            'attention_weights': [],
+            'layer_outputs': []
+        }
+        
+        # Forward through blocks, collecting diagnostics
+        for i, block in enumerate(self.blocks):
+            # Store input to this block
+            layer_input = x.detach()
+            
+            # If this is a self-attention block with accessible attention weights
+            if hasattr(block, 'self_attn') and hasattr(block.self_attn, 'get_attention_weights'):
+                # Forward through attention to get weights
+                x = block(x)
+                attn_weights = block.self_attn.get_attention_weights()
+                diagnostic_data['attention_weights'].append(attn_weights)
+            else:
+                # Regular forward
+                x = block(x)
+            
+            # Store output of this block
+            diagnostic_data['layer_outputs'].append(x.detach())
+        
+        # Final projection
+        x = self.projection(x)
+        diagnostic_data['final_output'] = x.detach()
+        
+        return x, diagnostic_data
 
 
 class TransformerBlock(nn.Module):
@@ -208,15 +288,21 @@ class TransformerBlock(nn.Module):
 
 class RNNAdapter(nn.Module):
     """
-    Standard RNN adapter for processing feature sequences.
+    RNN adapter for processing feature sequences
     
-    This adapter uses a simple RNN layer followed by a projection to transform
-    input features before passing them to the language model.
+    Transforms input sequences using simple RNN layers and projects to output dimension
     """
-    def __init__(self, embed_dim, output_dim, num_layers=2, dropout=0.1):
+    def __init__(self, input_dim, output_dim, num_layers=2, dropout=0.1):
+        """
+        Args:
+            input_dim: Dimension of input features per timestep
+            output_dim: Dimension of output features per timestep
+            num_layers: Number of RNN layers
+            dropout: Dropout rate
+        """
         super().__init__()
         self.rnn = nn.RNN(
-            input_size=embed_dim,
+            input_size=input_dim,
             hidden_size=output_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -228,7 +314,13 @@ class RNNAdapter(nn.Module):
         
     def forward(self, x):
         """
-        Forward pass through the RNN adapter.
+        Forward pass through the RNN adapter
+        
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, input_dim]
+            
+        Returns:
+            Output tensor of shape [batch_size, seq_len, output_dim]
         """
         output, _ = self.rnn(x)
         output = self.projection(output)

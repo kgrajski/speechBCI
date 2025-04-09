@@ -53,21 +53,15 @@ def process_generated_texts(texts, model_type):
     return [process_generated_output(text, model_type) for text in texts]
 
 
-def train_epoch(model, dataloader, optimizer, device):
-    """
-    Standard training epoch without gradient accumulation.
-
-    Args:
-        model: Model to train
-        dataloader: Training data loader
-        optimizer: Optimizer for parameter updates
-        device: Device to run on (cuda/cpu)
-
-    Returns:
-        float: Average loss for the epoch
-    """
+# Modify train_epoch to include additional losses
+def train_epoch(model, adapter, dataloader, optimizer, device, diversity_loss_weight=0.0, adapter_reg_weight=0.0, writer=None):
     model.train()
+    adapter.train()  # Make sure adapter is in training mode
+    
     total_loss = 0
+    total_main_loss = 0
+    total_diversity_loss = 0
+    total_reg_loss = 0
     steps = 0
 
     for batch in tqdm(dataloader, desc="Training"):
@@ -78,43 +72,91 @@ def train_epoch(model, dataloader, optimizer, device):
 
         # Zero gradients
         optimizer.zero_grad(set_to_none=True)
-
-        # Forward pass
+        
+        # Process inputs through adapter
+        adapter_outputs = adapter(inputs)
+        
+        # Forward pass through model
         outputs = model(
-            inputs_embeds=inputs, attention_mask=attention_mask, labels=labels
+            inputs_embeds=adapter_outputs,
+            attention_mask=attention_mask,
+            labels=labels
         )
 
-        # Use full loss
-        loss = outputs.loss
+        # Main language modeling loss
+        main_loss = outputs.loss
+        
+        # Initialize additional losses
+        diversity_loss = 0.0
+        reg_loss = 0.0
 
-        # Backward pass with error handling
-        try:
-            loss.backward()
-        except RuntimeError as e:
-            if "backward through the graph a second time" in str(e):
-                print("Warning: Graph reuse detected - using retain_graph")
-                loss.backward(retain_graph=True)
-            else:
-                raise e
+        # Calculate diversity loss if enabled
+        if diversity_loss_weight > 0:
+            # Calculate variance across feature dimension (higher variance = more diversity)
+            diversity_loss = -torch.var(adapter_outputs, dim=1).mean()
+            
+        # Calculate regularization loss if enabled
+        if adapter_reg_weight > 0:
+            # L2 regularization on the adapter output
+            reg_loss = torch.norm(adapter_outputs, p=2) / adapter_outputs.size(0)
+
+        # Combine losses
+        loss = main_loss + diversity_loss_weight * diversity_loss + adapter_reg_weight * reg_loss
+
+        # Backward pass
+        loss.backward()
 
         # Optimize
         optimizer.step()
 
-        # Track total loss
+        # Track losses
         total_loss += loss.item()
+        total_main_loss += main_loss.item()
+        
+        if diversity_loss_weight > 0:
+            total_diversity_loss += diversity_loss.item()
+        
+        if adapter_reg_weight > 0:
+            total_reg_loss += reg_loss.item()
+            
         steps += 1
+
+        # Log component losses every 20 steps
+        if writer is not None and steps % 20 == 0:
+            writer.add_scalar("Loss/step/main", main_loss.item(), steps)
+            if diversity_loss_weight > 0:
+                writer.add_scalar("Loss/step/diversity", diversity_loss.item(), steps)
+            if adapter_reg_weight > 0:
+                writer.add_scalar("Loss/step/reg", reg_loss.item(), steps)
+            writer.add_scalar("Loss/step/total", loss.item(), steps)
 
         # Free memory
         del inputs, attention_mask, labels, outputs, loss
+        if diversity_loss_weight > 0:
+            del diversity_loss
+        if adapter_reg_weight > 0:
+            del reg_loss
         torch.cuda.empty_cache()
         gc.collect()
 
+    # Calculate averages
     avg_loss = total_loss / steps
-    return avg_loss
+    avg_main_loss = total_main_loss / steps
+    avg_diversity_loss = total_diversity_loss / steps if diversity_loss_weight > 0 else 0
+    avg_reg_loss = total_reg_loss / steps if adapter_reg_weight > 0 else 0
+    
+    # Return all losses
+    return {
+        'total': avg_loss,
+        'main': avg_main_loss,
+        'diversity': avg_diversity_loss,
+        'reg': avg_reg_loss
+    }
 
 
 def evaluate(
     model,
+    adapter,  # Added adapter parameter
     dataloader,
     tokenizer,
     device,
@@ -126,33 +168,32 @@ def evaluate(
 ):
     """Evaluate model on a dataset, returning loss and both WER metrics."""
     model.eval()
+    adapter.eval()  # Set adapter to eval mode
+    
     total_loss = 0
     all_preds = []
-    all_original_texts = []  # NEW: collect original texts
+    all_original_texts = []
     steps = 0
 
     # Set up language constraints based on model type
     generation_kwargs = {
         "max_length": 30,
-        "min_length": 5,           # Encourage complete sentences
-        "num_beams": 8,            # More beams for better sentences
-        "do_sample": False,        # Start with deterministic generation
-        "length_penalty": 0.8,     # Favor shorter outputs
+        "min_length": 5,
+        "num_beams": 8,
+        "do_sample": False,
+        "length_penalty": 0.8,
         "early_stopping": True
     }
 
-    # Add model-specific parameters for English-only generation
+    # Model-specific parameters unchanged...
     model_type = model_type.lower()
     if model_type == "mbart":
-        # For multilingual BART: Force English BOS token
         generation_kwargs["forced_bos_token_id"] = tokenizer.lang_code_to_id["en_XX"]
     elif model_type == "t5":
-        # For T5: Use decoder_start_token_id
         generation_kwargs["decoder_start_token_id"] = (
             model.t5_model.config.decoder_start_token_id
         )
     elif model_type == "bart":
-        # For standard BART: Use the built-in BOS token
         generation_kwargs["decoder_start_token_id"] = tokenizer.bos_token_id
 
     with torch.no_grad():
@@ -161,48 +202,49 @@ def evaluate(
             inputs = batch["vqvae_embeddings"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["label_embeddings"].to(device)
-
-            # Get original text from batch
             original_texts = batch["original_text"]
 
-            # Forward pass
+            # Process inputs through adapter first
+            adapter_outputs = adapter(inputs)
+            
+            # Forward pass using adapter outputs
             outputs = model(
-                inputs_embeds=inputs, attention_mask=attention_mask, labels=labels
+                inputs_embeds=adapter_outputs,
+                attention_mask=attention_mask,
+                labels=labels
             )
 
             loss = outputs.loss
             total_loss += loss.item()
             steps += 1
 
-            # Generate predictions with constraints (as available and applicable)
+            # Generate predictions using adapter outputs
             generated_ids = model.generate(
-                inputs_embeds=inputs, attention_mask=attention_mask, **generation_kwargs
+                inputs_embeds=adapter_outputs,  # Use adapter outputs for generation
+                attention_mask=attention_mask,
+                **generation_kwargs
             )
 
             all_preds.extend(generated_ids.detach().cpu())
-            all_original_texts.extend(original_texts)  # Use original text instead
+            all_original_texts.extend(original_texts)
 
             # Free memory
-            del inputs, attention_mask, labels, outputs, generated_ids
+            del inputs, attention_mask, labels, outputs, generated_ids, adapter_outputs
             torch.cuda.empty_cache()
             gc.collect()
 
     avg_loss = total_loss / steps
 
-    # Decode predictions first
+    # Rest of the function unchanged...
     decoded_preds = tokenizer.batch_decode(all_preds, skip_special_tokens=True)
-
-    # Post-process the decoded predictions
     processed_preds = process_generated_texts(decoded_preds, model_type)
-
-    # Use processed predictions for WER calculation
     std_wer, orig_wer, num_uniq_pred_words = calculate_wer(
         processed_preds, 
         all_original_texts, 
         tokenizer, 
         model_dir, 
         split_name,
-        already_decoded=True  # Key parameter - predictions are already decoded
+        already_decoded=True
     )
 
     return avg_loss, std_wer, orig_wer, num_uniq_pred_words
@@ -246,6 +288,7 @@ def run_exp(
     test_dl,
     val_dl,
     model,
+    adapter,  # Added adapter parameter
     optimizer,
     tokenizer,
     device,
@@ -254,56 +297,68 @@ def run_exp(
     num_gen_beams,
     model_dir,
     tensorboard_dir,
-    model_type="t5",
-    eval_training_set=False
+    model_type,
+    eval_training_set,
+    diversity_loss_weight,
+    adapter_reg_weight,
+    diagnostics,
 ):
-    """Train and evaluate model, logging both standardized and original WER scores."""
+    """Train and evaluate model with additional loss components and optional diagnostics."""
     writer = SummaryWriter(log_dir=tensorboard_dir)
 
     model = model.to(device)
+    adapter = adapter.to(device)  # Ensure adapter is on the correct device
     best_test_loss = float("inf")
+    
+    # Log hyperparameters
+    writer.add_text("Hyperparameters/diversity_loss_weight", str(diversity_loss_weight), 0)
+    writer.add_text("Hyperparameters/adapter_reg_weight", str(adapter_reg_weight), 0)
 
-    def reset_state():
-        """Reset computation state to initial conditions"""
-        # Clear gradients
-        optimizer.zero_grad(set_to_none=True)
-
-        # Reset any cached states in the model
-        if hasattr(model, "t5_model"):
-            for module in model.t5_model.modules():
-                if hasattr(module, "cache_present"):
-                    module.cache_present = False
-
-        # Force garbage collection
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
+    # Initialize diagnostic step counter
+    diagnostic_steps = 0
 
     for epoch in range(num_epochs):
-        # Reset state before epoch
-        reset_state()
-
-        # Training phase
+        # Training phase with additional loss components
         model.train()
-        train_loss = train_epoch(model, train_dl, optimizer, device)
-        writer.add_scalar("Loss/train", train_loss, epoch)
+        adapter.train()
+        train_losses = train_epoch(
+            model, 
+            adapter,  # Pass adapter
+            train_dl, 
+            optimizer, 
+            device,
+            diversity_loss_weight=diversity_loss_weight,
+            adapter_reg_weight=adapter_reg_weight,
+            writer=writer
+        )
+        
+        # Log all loss components
+        writer.add_scalar("Loss/train/total", train_losses['total'], epoch)
+        writer.add_scalar("Loss/train/main", train_losses['main'], epoch)
+        if diversity_loss_weight > 0:
+            writer.add_scalar("Loss/train/diversity", train_losses['diversity'], epoch)
+        if adapter_reg_weight > 0:
+            writer.add_scalar("Loss/train/reg", train_losses['reg'], epoch)
 
-        # Reset state between phases
-        reset_state()
-
+        # Run diagnostics if enabled (every 2 epochs to save time)
+        if diagnostics is not None and epoch % 2 == 0:
+            diagnostics.capture_epoch_diagnostics(model, train_dl, epoch)
+            
         # Evaluation on training data (for diagnostics)
         if eval_training_set:
             model.eval()
+            adapter.eval()
             test_report_title = f"{exp_name}_training_set_epoch_{epoch}"
             train_loss_eval, train_std_wer, train_orig_wer, train_uniq_pred_words = evaluate(
                 model,
-                train_dl,
-                tokenizer,
-                device,
-                max_gen_seq_len,
-                num_gen_beams,
-                model_dir,
-                test_report_title,
+                adapter,  # Add adapter parameter
+                train_dl, 
+                tokenizer, 
+                device, 
+                max_gen_seq_len, 
+                num_gen_beams, 
+                model_dir, 
+                test_report_title, 
                 model_type=model_type,
             )
             print(
@@ -320,13 +375,14 @@ def run_exp(
         test_report_title = f"{exp_name}_test_set_epoch_{epoch}"
         test_loss, test_std_wer, test_orig_wer, test_unique_pred_words = evaluate(
             model,
-            test_dl,
-            tokenizer,
-            device,
-            max_gen_seq_len,
-            num_gen_beams,
-            model_dir,
-            test_report_title,
+            adapter,  # Add adapter parameter
+            test_dl, 
+            tokenizer, 
+            device, 
+            max_gen_seq_len, 
+            num_gen_beams, 
+            model_dir, 
+            test_report_title, 
             model_type=model_type,
         )
         writer.add_scalar("Loss/test", test_loss, epoch)
@@ -334,11 +390,15 @@ def run_exp(
         writer.add_scalar("WER/test_original", test_orig_wer, epoch)
         writer.add_scalar("Words/test_unique_pred_words", test_unique_pred_words, epoch)
 
-        print(
-            f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, "
-            f"Test WER: {test_std_wer:.4f}/{test_orig_wer:.4f}",
-            f"Unique pred words: {test_unique_pred_words}",
-        )
+        # Print detailed loss breakdown
+        loss_details = f"Epoch: {epoch+1}/{num_epochs}, Train Loss: {train_losses['total']:.4f} "
+        loss_details += f"(Main: {train_losses['main']:.4f}"
+        if diversity_loss_weight > 0:
+            loss_details += f", Div: {train_losses['diversity']:.4f}"
+        if adapter_reg_weight > 0:
+            loss_details += f", Reg: {train_losses['reg']:.4f}"
+        loss_details += f"), Test Loss: {test_loss:.4f}"
+        print(loss_details)
 
         # Save the best model
         if test_loss < best_test_loss:
@@ -349,17 +409,36 @@ def run_exp(
     save_model(model, model_dir, exp_name, suffix="final")
 
     # Final validation evaluation
-    reset_state()
+    model.eval()
+    adapter.eval()
+    with torch.no_grad():
+        for batch in val_dl:
+            inputs = batch["vqvae_embeddings"].to(device)
+            attention_mask = batch["attention_mask"].to(device) 
+            labels = batch["label_embeddings"].to(device)
+            
+            # Apply adapter
+            adapter_outputs = adapter(inputs)
+            
+            # Pass to model
+            outputs = model(
+                inputs_embeds=adapter_outputs,
+                attention_mask=attention_mask,
+                labels=labels
+            )
+            # Rest of evaluation code...
+
     test_report_title = f"{exp_name}_val_set_epoch_{epoch}"
     val_loss, val_std_wer, val_orig_wer, val_unique_pred_words = evaluate(
         model,
-        val_dl,
-        tokenizer,
-        device,
-        max_gen_seq_len,
-        num_gen_beams,
-        model_dir,
-        test_report_title,
+        adapter,  # Add adapter parameter
+        val_dl, 
+        tokenizer, 
+        device, 
+        max_gen_seq_len, 
+        num_gen_beams, 
+        model_dir, 
+        test_report_title, 
         model_type=model_type,
     )
     print(
@@ -372,5 +451,11 @@ def run_exp(
     writer.add_scalar("WER/validation_original", val_orig_wer, epoch)
     writer.add_scalar("Words/val_unique_pred_words", val_unique_pred_words, epoch)
     
+    if diagnostics is not None:
+        print("\n==== Running Final Diagnostics ====")
+        diagnostics.run_all_diagnostics(test_dl)
+        diagnostics.visualize_attention_patterns()
+        diagnostics.analyze_mode_collapse()
+        
     writer.close()
     return model

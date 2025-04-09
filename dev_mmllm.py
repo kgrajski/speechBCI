@@ -50,6 +50,7 @@ import gc
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, random_split, Subset  # Added Subset
+from mmllm.diagnostic_utils import ModelDiagnostics
 
 from dev_SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
 from transformers import (
@@ -65,7 +66,6 @@ from mmllm.label_utils import LabelAnalyzer
 from mmllm.training_utils import run_exp
 
 from Vqvae_Simple3D import VQVAE
-
 
 def main():
     """
@@ -98,6 +98,8 @@ def main():
     num_heads = 8 # Number of attention heads for the transformer adapter
     num_layers = 2 # Number of transformer layers for the transformer adapter
     dropout = 0.1  # Dropout rate for the transformer adapter
+    diversity_loss_weight = 0.1 # Additional loss term for diversity
+    adapter_reg_weight = 0.05 # Additional loss term for adapter regularization
 
     # Add these after adapter_type
     attention_mode = "global"  # Options: 'global', 'causal', 'local' 
@@ -139,17 +141,20 @@ def main():
     
     llm_embed_dim = vqvae_embed_dim * 8 * 4  # (which we set in main_vqvae3D.py)
     
-    max_input_seq_len = 224  # Padding to get batch dimension uniformity (not LLM requirements, per se).
+    max_input_seq_len = 256  # Padding to get batch dimension uniformity (not LLM requirements, per se).
     num_epochs = 20
     learning_rate = 1e-5
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 16
+    batch_size = 24
     max_gen_seq_len = 32
     num_gen_beams = 2
     eval_training_set = False
-
+    
+    # Diagnostics set up
+    enable_diagnostics = True
+    
     # VQVAE model for embedding preparation
     vqvae_model = VQVAE(num_ecog_input_channels, num_encoder_out_channels, vqvae_embed_dim, vqvae_num_embeddings)
     vqvae_model.load_state_dict(torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final.pt")))
@@ -233,11 +238,11 @@ def main():
     # Create LoRA model
     lora_base_model = get_lora_model(base_model, model_type=model_type)
 
-    # Create MMLLM model with appropriate adapter
-    mm_llm = create_embedding_model(
+    # Create MMLLM model and adapter as separate components
+    mm_llm, adapter = create_embedding_model(
         model_type=model_type, 
         base_model=lora_base_model, 
-        embed_dim=llm_embed_dim,  # Rename from embedding_dim to embed_dim
+        input_dim=llm_embed_dim,  # Changed from embed_dim to input_dim
         adapter_type=adapter_type,
         attention_mode=attention_mode,
         window_size=window_size,
@@ -246,12 +251,32 @@ def main():
         num_layers=num_layers,
         dropout=dropout,
     )
+    
+    if enable_diagnostics:
+        model_diagnostics = ModelDiagnostics(
+            model=mm_llm,
+            adapter=adapter,  # Add adapter to diagnostics
+            tokenizer=tokenizer,
+            tensorboard_dir=tensorboard_dir,
+            output_dir=os.path.join(mmllm_model_dir, "diagnostics"),
+        )
+    else:
+        model_diagnostics = None
 
     # Display model information
     mm_llm.print_trainable_parameters()
+    # Add adapter parameter display
+    if hasattr(adapter, "print_trainable_parameters"):
+        adapter.print_trainable_parameters()
+    else:
+        adapter_params = sum(p.numel() for p in adapter.parameters())
+        adapter_trainable = sum(p.numel() for p in adapter.parameters() if p.requires_grad)
+        print(f"\nAdapter parameters: {adapter_params:,}")
+        print(f"Adapter trainable parameters: {adapter_trainable:,} ({100*adapter_trainable/adapter_params:.2f}%)")
 
-    # Set up optimizer
-    optimizer = torch.optim.AdamW(mm_llm.parameters(), lr=learning_rate)
+    # Set up optimizer with parameters from both model and adapter
+    optimizer_params = list(mm_llm.parameters()) + list(adapter.parameters()) 
+    optimizer = torch.optim.AdamW(optimizer_params, lr=learning_rate)
 
     print(f"\nExperiment Configuration:")
     print(f"- Model Type: {model_type}")
@@ -272,6 +297,7 @@ def main():
             test_dl=test_dl,
             val_dl=val_dl,
             model=mm_llm,
+            adapter=adapter,  # Added adapter parameter
             optimizer=optimizer,
             tokenizer=tokenizer,
             device=device,
@@ -282,6 +308,9 @@ def main():
             tensorboard_dir=tensorboard_dir,
             model_type=model_type,  # Pass model type to functions
             eval_training_set=eval_training_set,
+            diversity_loss_weight=diversity_loss_weight,
+            adapter_reg_weight=adapter_reg_weight,
+            diagnostics=model_diagnostics,
         )
 
     end_time = time.perf_counter()

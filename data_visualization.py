@@ -10,6 +10,9 @@ Features:
 - Interactive Plotly Express visualizations
 - Filenames include word count for easy classification
 - Memory-efficient processing
+
+Development Reminder:
+- ls *.html | sort -t '_' -k7 -V -r | more
 """
 
 import os
