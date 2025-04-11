@@ -15,6 +15,35 @@ class LambdaLayer(nn.Module):
         
     def forward(self, x):
         return self.lambd(x)
+    
+class LinearBlock(nn.Module):
+    """Linkear block with pre-norm architecture and configurable feedforward dimension."""
+    
+    def __init__(self,
+                 input_dim,
+                 dropout,
+                 dim_feedforward=None,
+                 ):
+        super().__init__()
+        
+        # Set bottleneck dimension (default to input_dim // 4)
+        dim_feedforward = dim_feedforward or input_dim // 4
+        
+        # Pre-norm attention
+        self.norm1 = nn.LayerNorm(input_dim)
+        self.feedforward = nn.Sequential(
+            nn.Linear(input_dim, dim_feedforward),  # Bottleneck
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, input_dim),  # Project back
+            nn.Dropout(dropout)
+        )
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+
+        return self.dropout(self.feedforward(self.norm1(x)))
 
 
 class LinearAdapter(nn.Module):
@@ -23,18 +52,45 @@ class LinearAdapter(nn.Module):
     Simple linear transformation from input dimensions to output dimensions
     """
     
-    def __init__(self, input_dim, output_dim):
+    def __init__(
+        self, 
+        input_dim, 
+        output_dim,
+        num_layers,
+        dropout,
+    ):
         """
         Args:
-            input_dim: Dimension of input features
-            output_dim: Dimension of output features
+            input_dim: Dimension of input features per timestep
+            output_dim: Dimension of output features per timestep
+            num_layers: Number of transformer blocks
+            dropout: Dropout rate
         """
         super().__init__()
-        self.linear = nn.Linear(input_dim, output_dim)
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        
+        # Create multiple transformer blocks
+        self.blocks = nn.ModuleList([
+            LinearBlock(
+                input_dim=input_dim,
+                dropout=dropout,
+            ) for _ in range(num_layers)
+        ])
+        
+        # Output projection
+        self.projection = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.LayerNorm(output_dim)
+        )
         
     def forward(self, x):
-        return self.linear(x)
-    
+        # Pass through each transformer block
+        for block in self.blocks:
+            x = block(x)
+            
+        # Final projection
+        return self.projection(x)
     
 class LSTMAdapter(nn.Module):
     """LSTM-based adapter for temporal sequence processing
@@ -135,7 +191,7 @@ class SelfAttentionAdapter(nn.Module):
         # Create multiple transformer blocks
         self.blocks = nn.ModuleList([
             TransformerBlock(
-                embed_dim=input_dim,
+                input_dim=input_dim,
                 nhead=num_heads,
                 dropout=dropout,
                 attention_mode=attention_mode,
@@ -202,7 +258,7 @@ class TransformerBlock(nn.Module):
     """Transformer block with pre-norm architecture and configurable feedforward dimension."""
     
     def __init__(self,
-                 embed_dim,
+                 input_dim,
                  nhead,
                  dropout,
                  dim_feedforward=None,  # Allow configurable bottleneck dimension
@@ -210,25 +266,25 @@ class TransformerBlock(nn.Module):
                  window_size=None):
         super().__init__()
         
-        # Set bottleneck dimension (default to embed_dim // 4)
-        dim_feedforward = dim_feedforward or embed_dim // 4
+        # Set bottleneck dimension (default to input_dim // 4)
+        dim_feedforward = dim_feedforward or input_dim // 4
         
         # Pre-norm attention
-        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm1 = nn.LayerNorm(input_dim)
         self.self_attn = nn.MultiheadAttention(
-            embed_dim=embed_dim,
+            embed_dim=input_dim,
             num_heads=nhead,
             dropout=dropout,
             batch_first=True
         )
         
         # Pre-norm feedforward
-        self.norm2 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(input_dim)
         self.feedforward = nn.Sequential(
-            nn.Linear(embed_dim, dim_feedforward),  # Bottleneck
+            nn.Linear(input_dim, dim_feedforward),  # Bottleneck
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, embed_dim),  # Project back
+            nn.Linear(dim_feedforward, input_dim),  # Project back
             nn.Dropout(dropout)
         )
         

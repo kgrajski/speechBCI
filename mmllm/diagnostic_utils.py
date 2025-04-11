@@ -9,9 +9,20 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 class ModelDiagnostics:
-    """Comprehensive diagnostics for the multimodal LLM"""
+    """
+    Comprehensive diagnostics for the multimodal LLM architecture
     
-    def __init__(self, model, adapter, tokenizer, tensorboard_dir, output_dir):
+    This class provides tools to diagnose common issues in multimodal models:
+    - Mode collapse/compression (when adapter outputs become too similar)
+    - Attention pattern analysis (what the model is attending to)
+    - Output diversity assessment (how varied the model's outputs are)
+    - Parameter efficiency analysis
+    
+    These diagnostics help detect problems early in training and suggest
+    appropriate remedies before they become entrenched in the model.
+    """
+    
+    def __init__(self, model, adapter, tokenizer, writer, output_dir):
         """
         Initialize the diagnostics module
         
@@ -19,79 +30,38 @@ class ModelDiagnostics:
             model: The base MMLLM model 
             adapter: The input adapter component
             tokenizer: Tokenizer for decoding outputs
-            tensorboard_dir: Directory for tensorboard logs
+            writer: TensorBoard SummaryWriter instance for logging metrics
             output_dir: Directory to save diagnostic outputs
         """
         self.model = model
-        self.adapter = adapter  # Store adapter separately
+        self.adapter = adapter
         self.tokenizer = tokenizer
-        self.tensorboard_dir = tensorboard_dir
+        self.writer = writer  # Use provided writer instead of creating one
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         
-        self.writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, "diagnostics"))
         self.attention_patterns = []
         self.output_diversity = []
-        
-    def capture_epoch_diagnostics(self, epoch, dataloader):
-        """Capture diagnostics for a specific epoch"""
-        print(f"\nRunning diagnostics for epoch {epoch}...")
-        
-        # Save current model state
-        self.model.eval()
-        self.adapter.eval()  # Set adapter to eval mode too
-        device = next(self.model.parameters()).device
-        
-        with torch.no_grad():
-            # Get a batch
-            batch = next(iter(dataloader))
-            inputs = batch["vqvae_embeddings"].to(device)
-            
-            # Process through adapter first - this matches our processing flow
-            adapter_outputs = self.adapter(inputs)
-            
-            # Hook function to capture attention weights
-            attention_weights = []
-            
-            def attn_hook(module, input, output):
-                if isinstance(output, tuple) and len(output) > 1:
-                    attention_weights.append(output[1].detach().cpu())
-            
-            # Register hooks on attention layers
-            hooks = []
-            for name, module in self.model.named_modules():
-                if "self_attn" in name and "output" not in name:
-                    hooks.append(module.register_forward_hook(attn_hook))
-            
-            # Forward pass through model using adapter outputs
-            outputs = self.model(inputs_embeds=adapter_outputs)
-            
-            # Remove hooks
-            for hook in hooks:
-                hook.remove()
-            
-            # Analyze adapter outputs directly
-            self._analyze_adapter_outputs(adapter_outputs, epoch)
-            
-            # Store attention patterns for later visualization
-            if attention_weights:
-                self.attention_patterns.append({
-                    'epoch': epoch,
-                    'weights': attention_weights
-                })
-                
-            # Generate some text outputs and analyze diversity
-            generated_ids = self.model.generate(
-                inputs_embeds=adapter_outputs,  # Use adapter outputs
-                max_length=30,
-                num_beams=5
-            )
-            
-            decoded = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
-            self._analyze_text_diversity(decoded, epoch)
     
     def _analyze_adapter_outputs(self, adapter_outputs, epoch):
-        """Analyze the adapter outputs for diversity patterns"""
+        """
+        Analyze the adapter outputs for diversity and mode collapse patterns
+        
+        This method calculates cross-sample similarity and variance metrics.
+        
+        Expected healthy values:
+        - Mean similarity between samples: <0.6 (lower is better)
+        - Output standard deviation: >0.1 (higher is better)
+        
+        Warning signs:
+        - Increasing similarity over epochs (trend toward 1.0)
+        - Decreasing standard deviation over epochs (trend toward 0)
+        - Mean similarity >0.8 indicates severe mode collapse
+        
+        Args:
+            adapter_outputs: Outputs from the adapter
+            epoch: Current epoch number
+        """
         # Basic statistics
         mean_val = adapter_outputs.mean().item()
         std_val = adapter_outputs.std().item()
@@ -123,7 +93,24 @@ class ModelDiagnostics:
             })
     
     def _analyze_text_diversity(self, decoded_texts, epoch):
-        """Analyze diversity in generated text outputs"""
+        """
+        Analyze diversity in generated text outputs
+        
+        This tracks unique text ratio and unique first word count.
+        
+        Expected healthy values:
+        - Unique text ratio: >0.8 (higher is better)
+        - Unique first words: >5 for small batches, more for larger batches
+        
+        Warning signs:
+        - Unique text ratio decreasing over epochs
+        - Very low unique first words count (indicates repetitive starts)
+        - All texts starting with the same few words
+        
+        Args:
+            decoded_texts: List of decoded text strings
+            epoch: Current epoch number
+        """
         # Count unique texts and prefixes
         unique_texts = len(set(decoded_texts))
         
@@ -141,62 +128,90 @@ class ModelDiagnostics:
         self.writer.add_scalar("Text/unique_first_words", unique_first_words, epoch)
     
     def visualize_attention_patterns(self):
-        """Visualize attention patterns collected during training using Plotly"""
+        """
+        Visualize attention patterns collected during training using Plotly
+        
+        Generates interactive heatmaps of attention weights for each layer and head.
+        
+        What to look for:
+        - Healthy patterns: Structured, varied attention across the sequence
+        - Diagonal patterns: Model focusing on current token and nearby context
+        - Warning signs: 
+          - Uniform attention (all values close to 1/sequence_length)
+          - Extreme focus on only one or two positions
+          - No change in attention patterns across epochs
+        """
         if not self.attention_patterns:
-            print("No attention patterns collected")
+            print("No attention patterns collected. Skip visualization.")
             return
             
-        # Create plots directory
-        plots_dir = os.path.join(self.output_dir, "attention_plots")
-        os.makedirs(plots_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.output_dir, "attention_plots"), exist_ok=True)
         
-        # Plot attention patterns for each epoch
-        for pattern in self.attention_patterns:
-            epoch = pattern['epoch']
-            weights = pattern['weights']
+        # Process each epoch's attention data
+        for att_data in self.attention_patterns:
+            epoch = att_data['epoch']
+            weights = att_data['weights']
             
-            # Plot first few attention heads from different layers
-            for layer_idx, layer_weights in enumerate(weights[:3]):  # First 3 layers
-                # Create figure for multiple attention heads
-                n_heads = min(4, layer_weights.shape[1])  # Up to 4 heads
-                fig = make_subplots(rows=2, cols=2, 
-                                   subplot_titles=[f"Head {i}" for i in range(n_heads)])
-                
-                # Add attention maps for each head
-                for head_idx in range(n_heads):
-                    # Get attention map for this head
-                    attn_map = layer_weights[0, head_idx].numpy()
+            # Process each layer
+            for layer_idx, layer_weights in enumerate(weights):
+                # Convert attention weights to numpy for visualization
+                if isinstance(layer_weights, torch.Tensor):
+                    layer_weights = layer_weights.cpu().numpy()
                     
-                    # Create heatmap
-                    row, col = head_idx // 2 + 1, head_idx % 2 + 1
-                    fig.add_trace(
-                        go.Heatmap(z=attn_map, colorscale='Viridis'),
-                        row=row, col=col
-                    )
+                # Get shape information
+                if len(layer_weights.shape) == 4:
+                    batch_size, num_heads, seq_len, _ = layer_weights.shape
+                else:
+                    print(f"Skipping layer with unexpected shape: {layer_weights.shape}")
+                    continue
                 
-                # Update layout
+                # Create attention heatmap for first example in batch, first head
+                fig = go.Figure(data=go.Heatmap(
+                    z=layer_weights[0, 0],
+                    colorscale='Viridis'
+                ))
+                
                 fig.update_layout(
-                    title=f"Layer {layer_idx} Attention Patterns - Epoch {epoch}",
-                    height=800,
-                    width=1000
+                    title=f"Attention Pattern - Layer {layer_idx}, Epoch {epoch}",
+                    xaxis_title="Key Position",
+                    yaxis_title="Query Position"
                 )
                 
-                # Save as HTML
-                html_path = os.path.join(plots_dir, f"attention_epoch{epoch}_layer{layer_idx}.html")
-                fig.write_html(html_path)
+                # Save as HTML file
+                output_file = os.path.join(
+                    self.output_dir, 
+                    "attention_plots", 
+                    f"attention_epoch{epoch}_layer{layer_idx}.html"
+                )
+                fig.write_html(output_file)
                 
-                # Also save a static image for tensorboard
-                image_path = os.path.join(plots_dir, f"attention_epoch{epoch}_layer{layer_idx}.png")
-                fig.write_image(image_path)
-                
-                # Add image to tensorboard
-                with open(image_path, 'rb') as f:
-                    img_bytes = f.read()
-                    self.writer.add_image(f"Attention/layer{layer_idx}_epoch{epoch}", 
-                                         np.array(img_bytes), dataformats='raw')
+                # Use add_text instead of add_image - much cleaner approach
+                self.writer.add_text(
+                    f"Attention/layer{layer_idx}_epoch{epoch}",
+                    f"Attention visualization saved to {output_file}",
+                    global_step=epoch
+                )
     
     def analyze_mode_collapse(self):
-        """Analyze if mode collapse occurred during training using Plotly"""
+        """
+        Analyze if mode collapse occurred during training using Plotly
+        
+        Mode collapse is when the adapter maps different inputs to very similar 
+        representations, losing the ability to distinguish input variations.
+        
+        Plots cross-sample similarity and standard deviation over training.
+        
+        Interpretation:
+        - Healthy training: Similarity stays below 0.8, std.dev remains high
+        - Mode collapse: Similarity approaches 1.0, std.dev approaches 0
+        - Recovery: Similarity decreases after increasing, std.dev increases
+        
+        Corrective actions (if collapse detected):
+        - Increase diversity_loss_weight in training
+        - Reduce adapter complexity
+        - Lower the learning rate
+        - Add regularization to the adapter
+        """
         if not self.output_diversity:
             print("No output diversity data collected")
             return
@@ -267,11 +282,99 @@ class ModelDiagnostics:
             else:
                 f.write("Model appears to be maintaining representation diversity\n")
     
-    def run_all_diagnostics(self, dataloader):
-        """Run comprehensive diagnostics on model and adapter"""
-        self.model.eval()
+    def capture_epoch_diagnostics(self, model, dataloader, epoch):
+        """
+        Capture diagnostic snapshots for a specific training epoch
+        
+        Args:
+            model: The model to diagnose
+            dataloader: Data loader to use for diagnostics
+            epoch: Current epoch number
+        """
+        print(f"\nRunning diagnostics for epoch {epoch}...")
+        
+        model.eval()
         self.adapter.eval()
-        device = next(self.model.parameters()).device
+        device = next(model.parameters()).device
+        
+        with torch.no_grad():
+            # Get a batch
+            batch = next(iter(dataloader))
+            inputs = batch["vqvae_embeddings"].to(device)
+            attention_mask = batch["attention_mask"].to(device) if "attention_mask" in batch else None
+            labels = batch["label_embeddings"].to(device)
+            
+            # Process through adapter
+            adapter_outputs = self.adapter(inputs)
+            
+            # IMPORTANT: Use direct method to get attention instead of hooks
+            # Forward pass with explicit request for attention weights
+            outputs = model(
+                inputs_embeds=adapter_outputs,
+                attention_mask=attention_mask,
+                output_attentions=True,  # Request attention weights
+                labels=labels
+            )
+            
+            # Extract attention weights directly from outputs rather than using hooks
+            attention_weights = []
+            if hasattr(outputs, "encoder_attentions") and outputs.encoder_attentions:
+                attention_weights.extend([attn.cpu() for attn in outputs.encoder_attentions])
+            if hasattr(outputs, "decoder_attentions") and outputs.decoder_attentions:
+                attention_weights.extend([attn.cpu() for attn in outputs.decoder_attentions])
+            if hasattr(outputs, "cross_attentions") and outputs.cross_attentions:
+                attention_weights.extend([attn.cpu() for attn in outputs.cross_attentions])
+            
+            # Analyze adapter outputs
+            self._analyze_adapter_outputs(adapter_outputs, epoch)
+            
+            # Store attention patterns for later visualization
+            if attention_weights:
+                self.attention_patterns.append({
+                    'epoch': epoch,
+                    'weights': attention_weights
+                })
+                
+            # Generate text outputs with attention mask
+            try:
+                generated_ids = model.generate(
+                    inputs_embeds=adapter_outputs,
+                    attention_mask=attention_mask,
+                    max_length=30,
+                    num_beams=5
+                )
+                
+                decoded = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+                self._analyze_text_diversity(decoded, epoch)
+            except Exception as e:
+                print(f"Warning: Could not generate text during diagnostics: {e}")
+    
+    def run_all_diagnostics(self, dataloader, model=None):
+        """
+        Run comprehensive diagnostics on model and adapter
+        
+        This performs a full battery of tests to evaluate the health of the model-adapter system:
+        1. Adapter output analysis (distribution, diversity)
+        2. Internal representation visualization (activation patterns)
+        3. Generation diversity assessment
+        4. Parameter efficiency checks
+        
+        The visualizations and metrics help identify:
+        - Mode collapse issues
+        - Attention bottlenecks
+        - Representation quality problems
+        - Training inefficiencies
+        
+        Args:
+            dataloader: Data loader to use for diagnostics
+            model: Optional model to analyze (uses self.model if None)
+        """
+        # Use provided model or fall back to self.model
+        model = model or self.model
+        
+        model.eval()
+        self.adapter.eval()
+        device = next(model.parameters()).device
         
         # Analyze outputs from adapter
         print("\nAnalyzing adapter outputs...")
@@ -299,7 +402,7 @@ class ModelDiagnostics:
                 inputs = batch["vqvae_embeddings"].to(device)
                 adapter_outputs = self.adapter(inputs)
                 
-                generated_ids = self.model.generate(
+                generated_ids = model.generate(
                     inputs_embeds=adapter_outputs,
                     max_length=30,
                     num_beams=5,
@@ -312,7 +415,27 @@ class ModelDiagnostics:
         # Continue with output analysis...
     
     def _create_adapter_output_visualization(self, adapter_outputs):
-        """Create visualization of adapter output statistics"""
+        """
+        Create visualization of adapter output statistics
+        
+        Generates bar charts showing mean and standard deviation for each output dimension.
+        
+        Healthy indicators:
+        - Variable means across dimensions
+        - Substantial standard deviation in most dimensions
+        - No dominating dimensions (where one dimension has much larger values)
+        
+        Warning signs:
+        - Most dimensions near zero mean with tiny standard deviation
+        - A few dimensions with extremely high values (dimension collapse)
+        - Very uniform mean values across all dimensions
+        
+        Args:
+            adapter_outputs: Tensor of adapter outputs
+            
+        Returns:
+            Plotly figure with dimension statistics
+        """
         # Flatten outputs for analysis
         flat_outputs = adapter_outputs.reshape(-1, adapter_outputs.shape[-1])
         
@@ -345,7 +468,25 @@ class ModelDiagnostics:
         return fig
     
     def _visualize_adapter_diagnostics(self, diag_data):
-        """Visualize adapter's internal behavior based on diagnostic data"""
+        """
+        Visualize adapter's internal behavior based on diagnostic data
+        
+        Creates heatmaps of layer activations and attention maps.
+        
+        Healthy patterns:
+        - Diverse activation patterns across sequence positions
+        - Structured attention patterns that vary by position
+        - Progressive abstraction in deeper layers
+        
+        Warning signs:
+        - Highly similar activation patterns for different inputs
+        - Uniform attention weights (1/seq_len everywhere)
+        - Dead units (dimensions with zero activation)
+        - Saturated units (dimensions at max value)
+        
+        Args:
+            diag_data: Dictionary of diagnostic data from adapter
+        """
         # Create directory for adapter visualizations
         adapter_viz_dir = os.path.join(self.output_dir, "adapter_internals")
         os.makedirs(adapter_viz_dir, exist_ok=True)

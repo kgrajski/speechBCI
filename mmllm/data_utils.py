@@ -7,6 +7,92 @@ import os
 import numpy as np
 from jiwer import wer
 import string
+from tabulate import tabulate
+
+
+def log_metrics(writer, exp_name, description, metrics, epoch):
+    """Log metrics to TensorBoard and print to stdout using tabulate.
+
+    Args:
+        writer: TensorBoard writer object.
+        exp_name: Experiment name.
+        description: Description of the metrics (e.g., "training", "validation").
+        metrics: A dictionary where keys are metric names and values are metric values.
+        epoch: Epoch number.
+    """
+    # Log to TensorBoard
+    for metric_name, metric_value in metrics.items():
+        writer.add_scalar(
+            f"{exp_name}/{description}_{metric_name}", metric_value, epoch
+        )
+    writer.flush()
+
+    # Print to stdout using tabulate
+    table = []
+    for metric_name, metric_value in metrics.items():
+        table.append([metric_name, metric_value])
+
+    headers = ["Metric", "Value"]
+    print(f"\n{exp_name} - {description} - Epoch: {epoch}")
+    print(tabulate(table, headers=headers, tablefmt="grid"))
+    print("\n")
+
+
+# Process generated text to ensure proper sentence format
+def process_generated_output(text, model_type):
+    """Process a single generated text.
+
+    Args:
+        text: Decoded text string
+        model_type: Type of model (t5, bart, etc.)
+
+    Returns:
+        Processed text string
+    """
+    # For BART models, handle sentence tokens and ensure single sentence
+    if model_type.lower() == "bart":
+        # Remove sentence boundary tokens
+        text = text.replace("<sentence>", "").replace("</sentence>", "").strip()
+
+        # Ensure we have a single sentence with proper ending
+        if "." in text:
+            # Take first sentence and ensure it ends with period
+            text = text.split(".")[0].strip() + "."
+        elif len(text) > 0 and not text.endswith("."):
+            # Add period if missing
+            text = text.strip() + "."
+
+    return text
+
+
+def process_generated_texts(texts, model_type, task_prompt=""):
+    """Process a list of generated texts.
+
+    Args:
+        texts: List of decoded text strings
+        model_type: Type of model (t5, bart, etc.)
+        task_prompt: The prompt that was used for generation (e.g., "Generate a sentence:")
+
+    Returns:
+        List of processed text strings
+    """
+    processed_texts = []
+    for text in texts:
+        # Remove the task prompt
+        if task_prompt and text.startswith(task_prompt):
+            text = text[len(task_prompt):].strip()
+
+        # For BART models, handle sentence tokens and ensure single sentence
+        if model_type.lower() == "bart":
+            # Remove sentence boundary tokens
+            text = text.replace("<sentence>", "").replace("</sentence>", "").strip()
+
+            # Ensure we have a single sentence with proper ending
+            if not (text.endswith(".") or text.endswith("?") or text.endswith("!")):
+                text += "."
+
+        processed_texts.append(text)
+    return processed_texts
 
 
 def get_vqvae_codebook_average(model):

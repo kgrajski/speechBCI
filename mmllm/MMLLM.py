@@ -47,9 +47,9 @@ class MMLLM(nn.Module):
         print(f"Trainable parameters: {trainable_params:,} ({100 * trainable_params / total_params:.2f}%)")
         
         # Updated breakdown - no adapter inside MMLLM
-        lora_params = sum(p.numel() for n, p in self.named_parameters() 
-                         if 'lora_' in n and p.requires_grad)
-        other_params = trainable_params - lora_params
+        adapter_params = sum(p.numel() for n, p in self.named_parameters() 
+                        if 'input_adapter' in n and p.requires_grad)
+        other_params = trainable_params - adapter_params
         
-        print(f"  - LoRA parameters: {lora_params:,} ({100 * lora_params / trainable_params:.2f}%)")
+        print(f"  - Adapter parameters: {adapter_params:,} ({100 * adapter_params / trainable_params:.2f}%)")
         print(f"  - Other parameters: {other_params:,} ({100 * other_params / trainable_params:.2f}%)")

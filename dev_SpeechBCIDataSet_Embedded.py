@@ -130,6 +130,21 @@ class SpeechBCIDataSet_Embedded(Dataset):
             padded, mask = self._pad_label(label, max_seq_len, model_type, tokenizer)
             padded_label_ids.append(padded.squeeze())
             label_attention_masks.append(mask.squeeze())
+            
+        #
+        # Note that the padded samples and labels are now T x (E*H*W) tensors.
+        # The attention masks are T x 1 tensors.
+        # As a diagnostic, compute the min, max, average, and std of
+        # the attention mas lengths, where attention mask means the
+        # number of non-zero values in the mask.
+        attention_mask_lengths = [mask.sum().item() for mask in sample_attention_masks]
+        min_len = min(attention_mask_lengths)
+        max_len = max(attention_mask_lengths)
+        avg_len = np.mean(attention_mask_lengths)
+        std_len = np.std(attention_mask_lengths)
+        print(
+            f"Mask: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}"
+        )
 
         return (
             padded_samples,
@@ -171,8 +186,9 @@ class SpeechBCIDataSet_Embedded(Dataset):
         w = sample.shape[3]
         if seq_len > max_seq_len:
             print(
-                f"Warning _pad_sample: sample len {seq_len} > max_seq_len {max_seq_len}."
+                f"\nWarning _pad_sample: sample len {seq_len} > max_seq_len {max_seq_len}."
             )
+            sample = sample[:max_seq_len]
             seq_len = max_seq_len
             
         # Sample data is coming in as T x E x H x W
@@ -182,11 +198,11 @@ class SpeechBCIDataSet_Embedded(Dataset):
         # The padding vector is coming in as [E]
         # 1. First, repeat it H*W times to get a single flattened row
         flattened_padding = padding_vector.repeat(h * w)  # Shape: [E*H*W]
-        
+
         # 2. Create a new tensor filled with the padding value
         # Use repeat() instead of expand() to actually allocate new memory
         padded_sample = flattened_padding.unsqueeze(0).repeat(max_seq_len, 1)  # Shape: [max_seq_len, E*H*W]
-        
+
         # Copy original data (or truncate)
         copy_len = min(seq_len, max_seq_len)
         padded_sample[:copy_len] = sample[:copy_len]

@@ -19,9 +19,9 @@ class TransformerAdapter(nn.Module):
         self, 
         input_dim,  # Changed from embed_dim for consistency
         output_dim,  # Changed from hidden_size to match adapter_modules.py
-        attention_mode=None,
-        window_size=None,
-        total_input_dim=None,
+        adapter_type,
+        attention_mode,
+        window_size,
         num_heads=8,
         num_layers=2,
         dropout=0.1,
@@ -46,14 +46,14 @@ class TransformerAdapter(nn.Module):
         self.output_dim = output_dim  # Updated variable name
         
         # Determine which adapter implementation to use (defaulting to attention)
-        adapter_type = "attention" if attention_mode is not None else "linear"
         self.adapter_type = adapter_type.lower()
         
         # Configure the adapter based on type
         if self.adapter_type == "linear":
+            total_input_dim = None  # Placeholder for total input dimension
             # For linear adapters, input_dim represents the total flattened dimension
             linear_input_dim = total_input_dim if total_input_dim else input_dim
-            self.adapter = LinearAdapter(linear_input_dim, output_dim)
+            self.adapter = LinearAdapter(linear_input_dim, output_dim, num_layers, dropout)
         elif self.adapter_type == "lstm":
             self.adapter = LSTMAdapter(input_dim, output_dim)
         elif self.adapter_type == "conv":
