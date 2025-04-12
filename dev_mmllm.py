@@ -18,12 +18,13 @@ Development Reminders:
     
     TensorBoard Visualization:
         tensorboard --logdir='/home/ubuntu/speechBCI/data/competitionData/tensorboard/' --port=6008
-        # Then open browser to http://localhost:6006/
+        # Then open br        nvidia-smi -l 3  # Updates every 5 seconds
+owser to http://localhost:6006/
         
     Monitoring Learning Progres:
             Look at the predicted text and compare to the original text for training set.
         Go to llm_model_dir and look at the predictions files...
-        cat MM_LLM_BART_ATTENTION_VQ_VAE_64_512_test_set_epoch_1_predictions.txt  | grep "Predicted (original)" | sort | uniq -c
+        cat gen_test_predictions.txt | grep "Predicted (original)" | sort | uniq -c
             
             Look at the number of unique words being predicted.
         cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "original" | sort | uniq -c | \
@@ -51,7 +52,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, random_split, Subset  # Added Subset
 from torch.utils.tensorboard import SummaryWriter
-from mmllm.diagnostic_utils import ModelDiagnostics
+#from mmllm.diagnostic_utils import ModelDiagnostics
 
 from dev_SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
 
@@ -92,10 +93,10 @@ def main():
     # Identify the adapter type and select parameters
     adapter_type = "attention"  # Change this to 'rnn' to use the new RNN adapter
     num_heads = 2  # Number of attention heads for the transformer adapter
-    num_layers = 1  # Number of transformer layers for the transformer adapter
-    dropout = 0.1  # Dropout rate for the transformer adapter
-    diversity_loss_weight = 0.1  # Additional loss term for diversity
-    adapter_reg_weight = 0.1 # Additional loss term for adapter regularization
+    num_layers = 2  # Number of transformer layers for the transformer adapter
+    dropout = 0.2  # Dropout rate for the transformer adapter
+    diversity_loss_weight = 0.01  # Additional loss term for diversity
+    adapter_reg_weight = 0.01 # Additional loss term for adapter regularization
 
     # Add these after adapter_type
     attention_mode = "global"  # Options: 'global', 'causal', 'local'
@@ -139,13 +140,13 @@ def main():
     llm_embed_dim = vqvae_embed_dim * 8 * 4  # (which we set in main_vqvae3D.py)
 
     # Set up the model parameters
-    max_input_seq_len = 156
-    num_epochs = 10
-    learning_rate = 1e-5
+    max_input_seq_len = 212
+    num_epochs = 1000
+    learning_rate = 1e-3
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
-    batch_size = 24
+    batch_size = 32
 
     # Create MMLLM model and adapter as separate components
     mmllm = create_embedding_model(
@@ -228,10 +229,6 @@ def main():
     test_dl = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # Set up optimizer with parameters from the adapter - that is all we're training
-    optimizer_params = list(mmllm.input_adapter.parameters())
-    optimizer = torch.optim.AdamW(optimizer_params, lr=learning_rate)
-
     if training:
         # Train and evaluate the model
         run_exp(
@@ -243,9 +240,8 @@ def main():
             test_dl=test_dl,
             val_dl=val_dl,
 
-            optimizer=optimizer,
             num_epochs=num_epochs,
-
+            learning_rate=learning_rate,
             diversity_loss_weight=diversity_loss_weight,
             adapter_reg_weight=adapter_reg_weight,
             

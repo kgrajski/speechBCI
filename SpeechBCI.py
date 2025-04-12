@@ -16,7 +16,9 @@ Usage example:
     fig = electrode_array.tsplot(start_row=0, end_row=8)
     fig.show()
 """
-
+"""
+See also: https://github.com/fwillett/speechBCI
+"""
 #
 # 14March2025 - Stable.
 # Sequence: etl.py -> main_vqvae3D.py (training) -> main_vqvae3D.py (encoding) -> main_mmllm.py

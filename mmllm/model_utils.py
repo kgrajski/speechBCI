@@ -6,7 +6,7 @@ from peft import LoraConfig, get_peft_model, TaskType
 from mmllm.model_adapters.transformer_adapter import TransformerAdapter
 import torch
 import torch.nn as nn
-from .MMLLM import MMLLM
+from .deprecated.MMLLM import MMLLM
 from .MultimodalLLM import MultimodalLLM
 
 from transformers import (
@@ -45,7 +45,7 @@ def create_embedding_model(
         print("Using standard BART without multilingual support")
         
     else:
-        raise ValueError(f"Unsupported model type: {model_type}")
+        raise ValueError(f"Unsupported model type: {base_model_type}")
     
     # Create appropriate adapter based on adapter_type
     if adapter_type == "attention":

@@ -20,6 +20,26 @@ def training(
     adapter_reg_weight,
     device,
 ):
+    """Trains the multimodal language model.
+
+    Args:
+        description (str): Description of the training run.
+        mmllm (MultimodalLLM): The multimodal language model to train.
+        dataloader (DataLoader): The data loader for the training data.
+        optimizer (Optimizer): The optimizer to use for training.
+        diversity_loss_weight (float): Weight for the diversity loss. Encourages diverse
+            representations to avoid mode collapse.
+        adapter_reg_weight (float): Weight for the adapter regularization loss. Prevents
+            overfitting by penalizing large adapter weights.
+        device (torch.device): The device to train on (CPU or GPU).
+
+    Returns:
+        dict: A dictionary containing the average training losses.
+            "total": Average total loss.
+            "main": Average base model loss (cross-entropy).
+            "diversity": Average diversity loss.
+            "reg": Average adapter regularization loss.
+    """
 
     mmllm.to(device)
     mmllm.base_model.eval()  # Make sure model is in eval mode
@@ -48,7 +68,7 @@ def training(
             attention_mask,
             labels
         )
-    
+        
         # Compute losses
         diversity_loss = -torch.var(adapter_outputs, dim=1).mean()
         diversity_loss *= diversity_loss_weight
@@ -121,7 +141,6 @@ def generation(
         "num_return_sequences": 1,
         "temperature": 1.0,
         "top_k": 50,
-        "top_p": 0.95,
         "repetition_penalty": 1.0,
         "tokenizer": mmllm.tokenizer,  # Pass tokenizer to generation
     }
@@ -154,8 +173,10 @@ def generation(
     # Decode and process the generated texts
     decoded_preds = mmllm.tokenizer.batch_decode(all_preds, skip_special_tokens=True)
     processed_preds = process_generated_texts(
-        decoded_preds, mmllm.model_type, task_prompt
-    )  # Pass the task prompt here
+        decoded_preds,
+        mmllm.model_type,
+        task_prompt
+    )
 
     # Calculate WER
     std_wer, orig_wer, num_uniq_pred_words = calculate_wer(
@@ -186,13 +207,42 @@ def run_exp(
     train_dl,
     test_dl,
     val_dl,
-    optimizer,
     num_epochs,
+    learning_rate,
     diversity_loss_weight,
     adapter_reg_weight,
     model_dir,
     tensorboard_dir,
+    momentum=0.9,
+    lr_decay_factor=0.5,
+    lr_decay_epochs=10,
+    loss_plateau_epochs=5,
+    loss_threshold=0.001,
 ):
+    """Runs the multimodal language model experiment.
+
+    Args:
+        exp_name (str): The name of the experiment.
+        mmllm (MultimodalLLM): The multimodal language model to train.
+        device (torch.device): The device to train on (CPU or GPU).
+        train_dl (DataLoader): The data loader for the training data.
+        test_dl (DataLoader): The data loader for the test data.
+        val_dl (DataLoader): The data loader for the validation data.
+        num_epochs (int): The number of epochs to train for.
+        learning_rate (float): The initial learning rate.
+        diversity_loss_weight (float): Weight for the diversity loss.
+        adapter_reg_weight (float): Weight for the adapter regularization loss.
+        model_dir (str): The directory to save the model checkpoints.
+        tensorboard_dir (str): The directory to save the TensorBoard logs.
+        momentum (float): Momentum factor for the Adam optimizer.
+        lr_decay_factor (float): Factor by which to decay the learning rate.
+        lr_decay_epochs (int): Number of epochs after which to decay the learning rate.
+        loss_plateau_epochs (int): Number of epochs to wait for loss improvement.
+        loss_threshold (float): Minimum loss improvement to consider.
+
+    Returns:
+        MultimodalLLM: The trained multimodal language model.
+    """
 
     # Push the adapter and model to the device (probabaly redundant, but no harm)
     mmllm = mmllm.to(device)
@@ -206,12 +256,29 @@ def run_exp(
     # Clean-up before starting
     torch.cuda.empty_cache()
     gc.collect()
+    
+        # Set up optimizer with parameters from the adapter - that is all we're training
+    optimizer_params = list(mmllm.input_adapter.parameters())
+    optimizer = torch.optim.AdamW(
+        optimizer_params,
+        lr=learning_rate,
+        betas=(momentum, 0.999))
+
+    # Learning rate scheduler setup
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=lr_decay_epochs,
+        gamma=lr_decay_factor)
+
+    # Track loss history
+    best_train_loss = float('inf')
+    epochs_since_improvement = 0
 
     # Conduct the main loop
     for epoch in range(num_epochs):
 
         # Evaluate losses on training data and do a training step
-        description = "loss_train"
+        description = "loss_train" + f"_{epoch}"
         train_loss = training(
             description,
             mmllm,
@@ -223,8 +290,22 @@ def run_exp(
         )
         log_metrics(writer, exp_name, description, train_loss, epoch)
 
+        # Check for loss plateau
+        log_metrics(writer, exp_name, 'learing_rate', optimizer.param_groups, epoch)
+        if train_loss["total"] < best_train_loss - loss_threshold:
+            best_train_loss = train_loss["total"]
+            epochs_since_improvement = 0
+        else:
+            epochs_since_improvement += 1
+            if epochs_since_improvement >= loss_plateau_epochs:
+                # Reduce learning rate if loss plateaus
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] *= lr_decay_factor
+                print(f"Epoch {epoch}: Loss plateau: lr to {param_group['lr']}")
+                epochs_since_improvement = 0  # Reset counter
+
         # Generate and log word-level performance on the test set
-        description = "gen_test"
+        description = "gen_test" + f"_{epoch}"
         gen_test = generation(
             description,
             mmllm,
@@ -239,11 +320,14 @@ def run_exp(
             best_gen_test = gen_test["std_wer"]
             mmllm.save(model_dir, exp_name, suffix="best_gen_test")
 
+        # Step the scheduler
+        scheduler.step()
+
     # After training loop - save final model
     mmllm.save(model_dir, exp_name, suffix="final")
 
         # Generate and log word-level performance on the validation set
-    description = "gen_val"
+    description = "gen_val" + f"_{epoch}"
     gen_val = generation(
         description,
         mmllm,

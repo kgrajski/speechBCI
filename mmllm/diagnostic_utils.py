@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 from tqdm import tqdm
+import umap
 
 class ModelDiagnostics:
     """
@@ -520,3 +521,42 @@ class ModelDiagnostics:
                     color_continuous_scale="Viridis"
                 )
                 fig.write_html(os.path.join(adapter_viz_dir, f"attention_{i+1}_head_0.html"))
+
+import umap
+import plotly.express as px
+import os
+import torch
+import numpy as np
+
+class Plotter:
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    def plot_attention_heatmap(self, attention_weights, trial_id, layer_num, head_num):
+        """Plots attention heatmap for a specific layer and head."""
+        fig = px.imshow(
+            attention_weights,
+            labels=dict(x="Source", y="Target", color="Attention Weight"),
+            title=f"Attention Heatmap - Trial: {trial_id}, Layer: {layer_num}, Head: {head_num}",
+        )
+        filename = os.path.join(self.output_dir, f"attention_heatmap_trial_{trial_id}_layer_{layer_num}_head_{head_num}.html")
+        fig.write_html(filename)
+        print(f"Saved attention heatmap to {filename}")
+
+    def plot_umap_projection(self, data, trial_id, n_components=2):
+        """Plots UMAP projection of high-dimensional data."""
+        reducer = umap.UMAP(n_components=n_components)
+        embedding = reducer.fit_transform(data)
+
+        fig = px.scatter(
+            embedding,
+            x=0,
+
+
+
+
+
+
+
+        print(f"Saved UMAP projection to {filename}")        fig.write_html(filename)        filename = os.path.join(self.output_dir, f"umap_projection_trial_{trial_id}.html")        )            labels={"0": "UMAP Dimension 1", "1": "UMAP Dimension 2"},            title=f"UMAP Projection - Trial: {trial_id}",            y=1,        print(f"Saved UMAP projection to {filename}")
