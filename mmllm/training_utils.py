@@ -278,7 +278,7 @@ def run_exp(
     for epoch in range(num_epochs):
 
         # Evaluate losses on training data and do a training step
-        description = "loss_train" + f"_{epoch}"
+        description = "loss_train"
         train_loss = training(
             description,
             mmllm,
@@ -290,8 +290,12 @@ def run_exp(
         )
         log_metrics(writer, exp_name, description, train_loss, epoch)
 
-        # Check for loss plateau
-        log_metrics(writer, exp_name, 'learing_rate', optimizer.param_groups, epoch)
+        # Report current learning rate and check for loss plateau
+        log_metrics(writer,
+                    exp_name,
+                    'learing_rate',
+                    {'learning_rate': optimizer.param_groups[0]['lr']},
+                    epoch)
         if train_loss["total"] < best_train_loss - loss_threshold:
             best_train_loss = train_loss["total"]
             epochs_since_improvement = 0
@@ -305,7 +309,7 @@ def run_exp(
                 epochs_since_improvement = 0  # Reset counter
 
         # Generate and log word-level performance on the test set
-        description = "gen_test" + f"_{epoch}"
+        description = "gen_test"
         gen_test = generation(
             description,
             mmllm,
@@ -327,7 +331,7 @@ def run_exp(
     mmllm.save(model_dir, exp_name, suffix="final")
 
         # Generate and log word-level performance on the validation set
-    description = "gen_val" + f"_{epoch}"
+    description = "gen_val"
     gen_val = generation(
         description,
         mmllm,
