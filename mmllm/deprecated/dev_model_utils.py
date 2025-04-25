@@ -361,7 +361,7 @@ def create_embedding_model(
         # For standard VQVAE embeddings, import the original adapters
         print(f"Using standard adapter: {adapter_type}")
         try:
-            from mmllm.model_adapters import T5Adapter, BartAdapter
+            from mmllm.llm_encoders import T5Adapter, BartAdapter
             
             if model_type == "t5":
                 return T5Adapter(

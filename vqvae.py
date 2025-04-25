@@ -66,49 +66,53 @@ def main():
     torch_seed = 293487
     np.random.seed(numpy_seed)
     torch.manual_seed(torch_seed)
-    
+
     # Directory setup
     root_dir = "/home/ubuntu"
     project_dir = os.path.join(root_dir, "speechBCI")
     data_dir = os.path.join(project_dir, "data/competitionData")
-    
-        # Key parameters determing the VQ model itself
-        # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
+
+    # Key parameters determing the VQ model itself
+    # Recall the architecture is Encoder -> preVQ -> VQ -> postVQ -> Decoder
     embedding_dim = 64
     num_embeddings = 512
 
     # Experiment configuration
     vqvae_model_name = f"VQ_VAE_{embedding_dim}_{num_embeddings}"
-    ecog_subset = "6v_all"  # Requirement: alphanumeric only no spaces or special characters
+    ecog_subset = (
+        "6v_all"  # Requirement: alphanumeric only no spaces or special characters
+    )
 
     # Define all data directories using the common root
-    etl_dir = os.path.join(data_dir, "etl", ecog_subset) # This will be read
+    etl_dir = os.path.join(data_dir, "etl", ecog_subset)  # This will be read
     embed_base_dir = os.path.join(data_dir, "embeddings")
     models_base_dir = os.path.join(data_dir, "models")
     tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
-    
+
     # Model-specific directories
     embed_dir = os.path.join(embed_base_dir, vqvae_model_name)  # Write the embeddings
     os.makedirs(embed_dir, exist_ok=True)
     vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # Write the model
     os.makedirs(vqvae_model_dir, exist_ok=True)
-    tensorboard_dir = os.path.join(tensorboard_base_dir, vqvae_model_name)  # Write log data
+    tensorboard_dir = os.path.join(
+        tensorboard_base_dir, vqvae_model_name
+    )  # Write log data
     os.makedirs(tensorboard_dir, exist_ok=True)
 
-        # Key parameters describing the input data.
+    # Key parameters describing the input data.
     num_ecog_input_channels = 4
     num_encoder_out_channels = 128
     encoder_depth = 8  # Recall convention: B,C,D,H,W; D = encoder_depth
     depth_step_size = 4  # The depth stride when making samples from the raw input data.
 
-        # Describe how we want to do the training
+    # Describe how we want to do the training
     test_prop = 0.2
     train_prop = 1 - test_prop
     num_epochs = 10
     batch_size = 512
     learning_rate = 1e-3
-    
-        # Indicate whether we are training, embedding, or both
+
+    # Indicate whether we are training, embedding, or both
     training = False
     encoding = True
 
@@ -120,7 +124,7 @@ def main():
     #
     torch.autograd.set_detect_anomaly(True)
     study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth, depth_step_size)
-    
+
     train_test_indices = [
         i
         for i in range(len(study_dataset.val_flag))
@@ -133,7 +137,9 @@ def main():
     ]
 
     train_test_dataset = Subset(study_dataset, train_test_indices)
-    train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
+    train_dataset, test_dataset = random_split(
+        train_test_dataset, [train_prop, test_prop]
+    )
     val_dataset = Subset(study_dataset, val_indices)
 
     train_dl = DataLoader(
@@ -141,13 +147,13 @@ def main():
         batch_size=batch_size,
         shuffle=True,
     )
-    
+
     test_dl = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
     )
-    
+
     val_dl = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -160,7 +166,7 @@ def main():
         embedding_dim,
         num_embeddings,
     ).to(device)
-    
+
     optimizer = optim.Adam(
         model.parameters(),
         lr=learning_rate,
@@ -183,11 +189,13 @@ def main():
         )
 
     if encoding:
-        
+
         # Use the trained model to generate embeddings for the train, test, and validation sets
         #  Print the model as a refresh and sanity check.
         model.load_state_dict(
-            torch.load(os.path.join(vqvae_model_dir, vqvae_model_name + "_final" + ".pt"))
+            torch.load(
+                os.path.join(vqvae_model_dir, vqvae_model_name + "_final" + ".pt")
+            )
         )
         model.eval()
         print(model)

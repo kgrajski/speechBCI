@@ -7,45 +7,48 @@ class LabelAnalyzer:
     """
     Analyzes and provides statistics on text labels in a dataset.
     """
-    
-    def __init__(self, labels, train_test_flags=None, label_masks=None, attention_masks=None):
+
+    def __init__(
+        self, labels, train_test_flags=None, 
+    ):
         """Initialize with dataset labels and optional train/test flags."""
         self.labels = labels
         self.val_flag = train_test_flags
-        self.label_masks = label_masks
-        self.attention_masks = attention_masks
-        
+
         # Calculate overall statistics - FIX: Use self to access the static method
         self.overall_stats = self._get_label_statistics(labels)
-        
+
         # Calculate train/test stats if flags provided
         if train_test_flags is not None:
             self.train_test_stats = self._train_test_label_compare()
-    
+
     def get_overall_stats(self):
         """Returns statistics for the entire dataset"""
         return self.overall_stats
-    
+
     def get_train_test_stats(self):
         """Returns comparative statistics between train and test sets"""
-        if not hasattr(self, 'train_test_stats'):
+        if not hasattr(self, "train_test_stats"):
             raise ValueError("No train/test flags provided during initialization")
         return self.train_test_stats
-    
+
     def print_overall_stats(self):
         """Prints overall statistics in a formatted table"""
-        stats = {k: v for k, v in self.overall_stats.items() 
-                if k not in ["unique_words", "words"]}
-        
+        stats = {
+            k: v
+            for k, v in self.overall_stats.items()
+            if k not in ["unique_words", "words"]
+        }
+
         print("Dataset Statistics:")
         print(tabulate(stats.items(), headers=["Statistic", "Value"], tablefmt="grid"))
-    
+
     def print_train_test_comparison(self):
         """Prints the comparison between train and test sets"""
-        if not hasattr(self, 'train_test_stats'):
+        if not hasattr(self, "train_test_stats"):
             raise ValueError("No train/test flags provided during initialization")
         self._pretty_print_label_stats(self.train_test_stats)
-    
+
     def _train_test_label_compare(self):
         """Compares label statistics between training and testing sets."""
         # Split labels into training and testing sets
@@ -101,12 +104,7 @@ class LabelAnalyzer:
             "top_20_unique_train_words": top_20_unique_train_words,
             "top_20_unique_test_words": top_20_unique_test_words,
         }
-        
-        # Only add mask-related stats if masks are provided
-        if self.label_masks is not None and self.attention_masks is not None:
-            label_stats["max_embedded_label_len"] = max([mask.sum() for mask in self.label_masks])
-            label_stats["max_attention_mask_len"] = max([mask.sum() for mask in self.attention_masks])
-        
+
         return label_stats
 
     @staticmethod

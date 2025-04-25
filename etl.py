@@ -11,7 +11,7 @@ Functions:
 Usage example:
     Run the script from the command line to process all .mat files in the specified directory:
     $ python etl.py
-    
+
 Reference to the raw data:
     https://github.com/fwillett/speechBCI
     https://eval.ai/web/challenges/challenge-page/2099/overview
@@ -133,7 +133,7 @@ def etl_blockZ(
                 num_cols = 8
             else:
                 raise ValueError("Invalid ECoG subset specified")
-            
+
             x = ElectrodeArray(
                 var_name,
                 session_id,
@@ -191,26 +191,26 @@ def main():
 
     np.random.seed(42)
     random.seed(42)
-    
+
     # There are different ways to subset the raw ECOG data.
     # 6vinf - 6v inferior as B x C x D x 8 x 8
     # 6vall - 6v superior and 6v inferior sa B x C x D x 16 x 8
-    ecog_subset = "6v_all" # Requirement: xx_xx (assumed by next stage in pipeline)
+    ecog_subset = "6v_all"  # Requirement: xx_xx (assumed by next stage in pipeline)
 
     # Directory setup
     root_dir = "/home/ubuntu"
     project_dir = os.path.join(root_dir, "speechBCI")
     data_dir = os.path.join(project_dir, "data/competitionData")
-    
+
     # ETL-specific directories
-    raw_data_dir = os.path.join(data_dir, "train") # This will be read only
-    
-    etl_dir = os.path.join(data_dir, "etl", ecog_subset) # This will be written to
+    raw_data_dir = os.path.join(data_dir, "train")  # This will be read only
+
+    etl_dir = os.path.join(data_dir, "etl", ecog_subset)  # This will be written to
     os.makedirs(etl_dir, exist_ok=True)
-    
-    stats_dir = os.path.join(data_dir, "stats", ecog_subset) # This will be written to
+
+    stats_dir = os.path.join(data_dir, "stats", ecog_subset)  # This will be written to
     os.makedirs(stats_dir, exist_ok=True)
-    
+
     # Make a list of the inpur raw data files.
     mat_files = []
     for root, _, files in os.walk(raw_data_dir):
@@ -223,7 +223,7 @@ def main():
     tot_num_blocks = 0
     tot_num_trials = 0
     tot_time_samples = 0
-    
+
     # Iterate through the raw data files.
     # Each file contains data for a multi-trial session in speechBCI world
     for mat_file_path in mat_files:

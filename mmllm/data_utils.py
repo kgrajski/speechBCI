@@ -80,7 +80,7 @@ def process_generated_texts(texts, model_type, task_prompt=""):
     for text in texts:
         # Remove the task prompt
         if task_prompt and text.startswith(task_prompt):
-            text = text[len(task_prompt):].strip()
+            text = text[len(task_prompt) :].strip()
 
         # For BART models, handle sentence tokens and ensure single sentence
         if model_type.lower() == "bart":
@@ -123,9 +123,11 @@ def get_vqvae_codebook_average(model):
     return avg_vector
 
 
-def calculate_wer(predictions, references, tokenizer, model_dir, split_name, already_decoded=False):
+def calculate_wer(
+    predictions, references, tokenizer, model_dir, split_name, already_decoded=False
+):
     """Calculate WER between predictions and references.
-    
+
     Args:
         predictions: List of generated text or token IDs
         references: List of reference texts
@@ -133,7 +135,7 @@ def calculate_wer(predictions, references, tokenizer, model_dir, split_name, alr
         model_dir: Directory to save prediction reports
         name_prefix: Prefix for the report filename
         already_decoded: Whether predictions are already decoded text (True) or token IDs (False)
-        
+
     Returns:
         tuple: (standardized_wer, original_wer, unique_word_count)
     """
@@ -173,11 +175,13 @@ def calculate_wer(predictions, references, tokenizer, model_dir, split_name, alr
         for orig_target, orig_pred in zip(references, decoded_preds)
     ]
     orig_mean_wer = np.mean(orig_wer_scores)
-    
+
     # The variable decoded_preds is a list of a list of strings. Using list
     # comprehension, find the number of unique words and return as num_uniq_pred_words
-    num_uniq_pred_words = len(set([word for sent in decoded_preds for word in sent.split()]))
-    
+    num_uniq_pred_words = len(
+        set([word for sent in decoded_preds for word in sent.split()])
+    )
+
     return std_mean_wer, orig_mean_wer, num_uniq_pred_words
 
 

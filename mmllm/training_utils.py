@@ -9,6 +9,13 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from mmllm.data_utils import calculate_wer
 from mmllm.data_utils import process_generated_texts, log_metrics
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+import numpy as np
+import time
+from typing import Dict, Any, Optional, List, Tuple
+from mmllm.diagnostic_utils import ModelDiagnostics
 
 
 def training(
@@ -17,33 +24,13 @@ def training(
     dataloader,
     optimizer,
     diversity_loss_weight,
-    adapter_reg_weight,
+    encoder_reg_weight,
     device,
 ):
-    """Trains the multimodal language model.
-
-    Args:
-        description (str): Description of the training run.
-        mmllm (MultimodalLLM): The multimodal language model to train.
-        dataloader (DataLoader): The data loader for the training data.
-        optimizer (Optimizer): The optimizer to use for training.
-        diversity_loss_weight (float): Weight for the diversity loss. Encourages diverse
-            representations to avoid mode collapse.
-        adapter_reg_weight (float): Weight for the adapter regularization loss. Prevents
-            overfitting by penalizing large adapter weights.
-        device (torch.device): The device to train on (CPU or GPU).
-
-    Returns:
-        dict: A dictionary containing the average training losses.
-            "total": Average total loss.
-            "main": Average base model loss (cross-entropy).
-            "diversity": Average diversity loss.
-            "reg": Average adapter regularization loss.
-    """
-
+    """Training loop for the multimodal language model."""
     mmllm.to(device)
     mmllm.base_model.eval()  # Make sure model is in eval mode
-    mmllm.input_adapter.train()  # Make sure adapter is in training mode
+    mmllm.input_encoder.train()  # Make sure encoder is in training mode
 
     total_loss = 0
     total_base_model_loss = 0
@@ -52,28 +39,30 @@ def training(
     steps = 0
 
     for batch in tqdm(dataloader, desc=description):
-
         # Process batch - forward step
-        # Unpack batch
         inputs = batch["vqvae_embeddings"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
+        padding_masks = batch["padding_masks"].to(device)
         labels = batch["label_embeddings"].to(device)
 
         # Zero gradients
         optimizer.zero_grad(set_to_none=True)
 
         # Forward pass through model
-        adapter_outputs, mmllm_outputs = mmllm.forward(
-            inputs,
-            attention_mask,
-            labels
-        )
-        
+        encoder_outputs, mmllm_outputs = mmllm(inputs, padding_masks, labels)  # Uses __call__ which calls forward
+
         # Compute losses
-        diversity_loss = -torch.var(adapter_outputs, dim=1).mean()
+        batch_size = encoder_outputs.shape[0]
+        flattened_outputs = encoder_outputs.reshape(batch_size, -1)
+        
+        # Compute diversity loss on encoder outputs
+        diversity_loss = -torch.var(flattened_outputs, dim=0).mean()  # Variance across batch
         diversity_loss *= diversity_loss_weight
-        reg_loss = torch.norm(adapter_outputs, p=2) / adapter_outputs.size(0)
-        reg_loss *= adapter_reg_weight
+        
+        # Regularization loss
+        reg_loss = torch.norm(encoder_outputs, p=2) / encoder_outputs.size(0)
+        reg_loss *= encoder_reg_weight
+        
+        # Total loss
         loss = mmllm_outputs.loss + diversity_loss + reg_loss
 
         # Backward pass
@@ -87,31 +76,26 @@ def training(
         total_base_model_loss += mmllm_outputs.loss
         total_diversity_loss += diversity_loss
         total_reg_loss += reg_loss
-
-        # Increment steps
         steps += 1
-        
-        # Clean up
-        del inputs, attention_mask, labels, adapter_outputs, mmllm_outputs 
 
-    # Calculate averages
+        # Clean up
+        del inputs, padding_masks, labels, encoder_outputs, mmllm_outputs
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    # Compute average losses
     avg_total_loss = total_loss / steps
     avg_base_model_loss = total_base_model_loss / steps
     avg_diversity_loss = total_diversity_loss / steps
     avg_reg_loss = total_reg_loss / steps
-    
-    # Clean up
-    torch.cuda.empty_cache()
-    gc.collect()
 
-    # Return  losses
-    losses = {
+    return {
         "total": avg_total_loss,
         "main": avg_base_model_loss,
         "diversity": avg_diversity_loss,
         "reg": avg_reg_loss,
     }
-    return losses
+
 
 def generation(
     description,
@@ -120,44 +104,42 @@ def generation(
     model_dir,
     device,
 ):
+    """Generate text from the model and calculate WER metrics."""
     mmllm.to(device)
     mmllm.base_model.eval()  # Make sure model is in eval mode
-    mmllm.input_adapter.eval()  # Make sure adapter is in training mode
+    mmllm.input_encoder.eval()  # Make sure encoder is in eval mode
 
     all_preds = []
     all_original_texts = []
 
     # Set up language constraints based on model type
-    # Let's over-specify the generation_kwargs for now
-    task_prompt = "Generate a sentence: "  # Define the task prompt here
+    task_prompt = "Generate a sentence: "
     generation_kwargs = {
-        "max_length": 64,
+        "max_length": 32,
         "min_length": 5,
         "num_beams": 4,
         "do_sample": False,
         "length_penalty": 0.8,
         "early_stopping": True,
-        "task_prompt": task_prompt,  # Pass the task prompt
+        "task_prompt": task_prompt,
         "num_return_sequences": 1,
         "temperature": 1.0,
         "top_k": 50,
         "repetition_penalty": 1.0,
-        "tokenizer": mmllm.tokenizer,  # Pass tokenizer to generation
+        "tokenizer": mmllm.tokenizer,
     }
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc=description):
-            # Unpack batch
-
             inputs = batch["vqvae_embeddings"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
+            padding_masks = batch["padding_masks"].to(device)
             labels = batch["label_embeddings"].to(device)
             original_texts = batch["original_text"]
 
-            # Generate predictions using the mmllm.generate method
-            generated_ids = mmllm.generate(
+            # Generate predictions using the generate method
+            generated_ids = mmllm.generate(  # Direct call to generate method
                 input_embeddings=inputs,
-                attention_mask=attention_mask,
+                padding_masks=padding_masks,
                 **generation_kwargs,
             )
 
@@ -165,17 +147,14 @@ def generation(
             all_original_texts.extend(original_texts)
 
             # Free memory
-            del inputs, attention_mask, labels, generated_ids
-
+            del inputs, padding_masks, labels, generated_ids
             torch.cuda.empty_cache()
             gc.collect()
 
     # Decode and process the generated texts
     decoded_preds = mmllm.tokenizer.batch_decode(all_preds, skip_special_tokens=True)
     processed_preds = process_generated_texts(
-        decoded_preds,
-        mmllm.model_type,
-        task_prompt
+        decoded_preds, mmllm.model_type, task_prompt
     )
 
     # Calculate WER
@@ -192,17 +171,15 @@ def generation(
     torch.cuda.empty_cache()
     gc.collect()
 
-    # Return the results
     return {
         "std_wer": std_wer,
         "orig_wer": orig_wer,
         "num_uniq_pred_words": num_uniq_pred_words,
     }
-    
 
 def run_exp(
     exp_name,
-    mmllm,  # model is an instance of MultimodalLLM: adapter + base
+    mmllm,  # model is an instance of MultimodalLLM: encoder + base
     device,
     train_dl,
     test_dl,
@@ -210,9 +187,10 @@ def run_exp(
     num_epochs,
     learning_rate,
     diversity_loss_weight,
-    adapter_reg_weight,
+    encoder_reg_weight,
     model_dir,
     tensorboard_dir,
+    enable_diagnostics,
     momentum=0.9,
     lr_decay_factor=0.5,
     lr_decay_epochs=10,
@@ -231,7 +209,7 @@ def run_exp(
         num_epochs (int): The number of epochs to train for.
         learning_rate (float): The initial learning rate.
         diversity_loss_weight (float): Weight for the diversity loss.
-        adapter_reg_weight (float): Weight for the adapter regularization loss.
+        encoder_reg_weight (float): Weight for the encoder regularization loss.
         model_dir (str): The directory to save the model checkpoints.
         tensorboard_dir (str): The directory to save the TensorBoard logs.
         momentum (float): Momentum factor for the Adam optimizer.
@@ -244,7 +222,7 @@ def run_exp(
         MultimodalLLM: The trained multimodal language model.
     """
 
-    # Push the adapter and model to the device (probabaly redundant, but no harm)
+    # Push the encoder and model to the device (probabaly redundant, but no harm)
     mmllm = mmllm.to(device)
 
     # Set reference test_loss used to decide whether and when to write a model
@@ -257,8 +235,8 @@ def run_exp(
     torch.cuda.empty_cache()
     gc.collect()
     
-        # Set up optimizer with parameters from the adapter - that is all we're training
-    optimizer_params = list(mmllm.input_adapter.parameters())
+        # Set up optimizer with parameters from the encoder - that is all we're training
+    optimizer_params = list(mmllm.input_encoder.parameters())
     optimizer = torch.optim.AdamW(
         optimizer_params,
         lr=learning_rate,
@@ -274,6 +252,16 @@ def run_exp(
     best_train_loss = float('inf')
     epochs_since_improvement = 0
 
+    # Initialize diagnostics
+    if enable_diagnostics:
+        diagnostics = ModelDiagnostics(
+            model=mmllm.base_model,
+            encoder=mmllm.input_encoder,
+            tokenizer=mmllm.tokenizer,
+            writer=writer,
+            output_dir=model_dir
+        )
+
     # Conduct the main loop
     for epoch in range(num_epochs):
 
@@ -285,7 +273,7 @@ def run_exp(
             train_dl,
             optimizer,
             diversity_loss_weight,
-            adapter_reg_weight,
+            encoder_reg_weight,
             device,
         )
         log_metrics(writer, exp_name, description, train_loss, epoch)
@@ -327,6 +315,9 @@ def run_exp(
         # Step the scheduler
         scheduler.step()
 
+        # Capture epoch diagnostics
+        diagnostics.capture_epoch_diagnostics(mmllm, train_dl, epoch)
+
     # After training loop - save final model
     mmllm.save(model_dir, exp_name, suffix="final")
 
@@ -348,6 +339,11 @@ def run_exp(
     # Clean-up before exiting
     torch.cuda.empty_cache()
     gc.collect()
+
+    # Final diagnostics
+    print("\nRunning final diagnostics...")
+    diagnostics.analyze_mode_collapse()
+    print("Diagnostics complete. Check TensorBoard for detailed metrics.")
 
     # Return the model
     return mmllm

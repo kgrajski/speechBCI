@@ -24,7 +24,7 @@ owser to http://localhost:6006/
     Monitoring Learning Progres:
             Look at the predicted text and compare to the original text for training set.
         Go to llm_model_dir and look at the predictions files...
-        cat gen_test_predictions.txt | grep "Predicted (original)" | sort | uniq -c
+        cat *predictions.txt | grep "Predicted (original)" | sort | uniq -c
             
             Look at the number of unique words being predicted.
         cat MM_LLM_BART_training_set_epoch_4_predictions.txt | grep "Predict" | grep "original" | sort | uniq -c | \
@@ -52,10 +52,20 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, random_split, Subset  # Added Subset
 from torch.utils.tensorboard import SummaryWriter
-#from mmllm.diagnostic_utils import ModelDiagnostics
+
+# Add current directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Test import
+try:
+    from mmllm.diagnostic_utils import ModelDiagnostics
+    print("Successfully imported ModelDiagnostics")
+except ImportError as e:
+    print(f"Error importing ModelDiagnostics: {e}")
+    print(f"Current Python path: {sys.path}")
+    sys.exit(1)
 
 from dev_SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
-
 from mmllm.data_utils import get_vqvae_codebook_average
 from mmllm.model_utils import create_embedding_model, get_lora_model
 from mmllm.label_utils import LabelAnalyzer
@@ -90,15 +100,15 @@ def main():
     # Identify the base model type
     base_model_type = "bart"  # Change to 'bart' to use BART instead
 
-    # Identify the adapter type and select parameters
-    adapter_type = "attention"  # Change this to 'rnn' to use the new RNN adapter
-    num_heads = 2  # Number of attention heads for the transformer adapter
-    num_layers = 2  # Number of transformer layers for the transformer adapter
-    dropout = 0.2  # Dropout rate for the transformer adapter
+    # Identify the encoder type and select parameters
+    encoder_type = "attention"  # Change this to 'rnn' to use the new RNN encoder
+    num_heads = 1  # Number of attention heads for the transformer encoder
+    num_layers = 1  # Number of transformer layers for the transformer encoder
+    dropout = 0.2  # Dropout rate for the transformer encoder
     diversity_loss_weight = 0.01  # Additional loss term for diversity
-    adapter_reg_weight = 0.01 # Additional loss term for adapter regularization
+    encoder_reg_weight = 0.01  # Additional loss term for encoder regularization
 
-    # Add these after adapter_type
+    # Add these after encoder_type
     attention_mode = "global"  # Options: 'global', 'causal', 'local'
     window_size = None  # For local attention window size
 
@@ -106,7 +116,7 @@ def main():
     vqvae_model_name = "VQ_VAE_64_512"
     exp_name = (
         f"MM_LLM_{base_model_type.upper()}"
-        + f"_{adapter_type.upper()}"
+        + f"_{encoder_type.upper()}"
         + f"_{vqvae_model_name}"
     )
     print(f"Experiment name: {exp_name}")
@@ -118,14 +128,14 @@ def main():
 
     # Define data directories using the common root
     etl_dir = os.path.join(data_dir, "etl", ecog_subset)  # This will be read
-    embed_dir = os.path.join(data_dir, "embeddings")  # This will be written to
-    models_base_dir = os.path.join(data_dir, "models")
-    tensorboard_base_dir = os.path.join(data_dir, "tensorboard")
+    embed_dir = os.path.join(data_dir, "embeddings")  # This will be read
+    models_base_dir = os.path.join(data_dir, "models") # This will be written
+    tensorboard_base_dir = os.path.join(data_dir, "tensorboard") # This will be written
 
     # Model-specific directories
     vqvae_model_dir = os.path.join(models_base_dir, vqvae_model_name)  # This will be read only
     embed_dir = os.path.join(embed_dir, vqvae_model_name)  # This will be read only
-    mmllm_model_dir = os.path.join(models_base_dir, exp_name)
+    mmllm_model_dir = os.path.join(models_base_dir, exp_name) # This will be written
     os.makedirs(mmllm_model_dir, exist_ok=True)
 
     # TensorBoard directory
@@ -141,16 +151,18 @@ def main():
 
     # Set up the model parameters
     max_input_seq_len = 212
-    num_epochs = 1000
-    learning_rate = 1e-3
+    max_label_seq_len = 32
+    num_epochs = 5
+    learning_rate = 1e-5
     training = True
     test_prop = 0.2
     train_prop = 1 - test_prop
     batch_size = 32
+    enable_diagnostics = True  # Added diagnostic flag
 
-    # Create MMLLM model and adapter as separate components
+    # Create MMLLM model and encoder as separate components
     mmllm = create_embedding_model(
-        adapter_type=adapter_type,
+        encoder_type=encoder_type,
         base_model_type=base_model_type,
         input_dim=llm_embed_dim,
         attention_mode=attention_mode,
@@ -159,13 +171,13 @@ def main():
         num_layers=num_layers,
         dropout=dropout,
     )
-    
+
     # Display model information
     mmllm.print_trainable_parameters()
-    
+
     # Send model to device
     mmllm = mmllm.to(device)
-    
+
     # Set up embedding data - use VQ-VAE model average vec for padding.
     # Specify the VQVAE model for embedding preparation
     vqvae_model = VQVAE(
@@ -194,6 +206,7 @@ def main():
         tokenizer=mmllm.tokenizer,
         model_type=base_model_type,
         max_seq_len=max_input_seq_len,
+        max_label_seq_len=max_label_seq_len,
         padding_vector=padding_vector,  # padding_vector has dim [vqvae_embed_dim]
     )
 
@@ -207,21 +220,27 @@ def main():
 
     # Check the label statistics
     label_stats = LabelAnalyzer(
-        study_dataset.labels,
+        study_dataset.labels, # This is the actual label text (not the tokenized labels)
         study_dataset.val_flag,
-        study_dataset.label_masks,
-        study_dataset.attention_masks,
     )
-    #label_stats.print_overall_stats()
-    #label_stats.print_train_test_comparison()
+    # label_stats.print_overall_stats()
+    # label_stats.print_train_test_comparison()
 
     # Subset the study data as described above.
-    train_test_indices = [i for i in range(len(study_dataset.val_flag))
-        if study_dataset.val_flag[i] is False]
-    val_indices = [i for i in range(len(study_dataset.val_flag))
-        if study_dataset.val_flag[i] is True]
+    train_test_indices = [
+        i
+        for i in range(len(study_dataset.val_flag))
+        if study_dataset.val_flag[i] is False
+    ]
+    val_indices = [
+        i
+        for i in range(len(study_dataset.val_flag))
+        if study_dataset.val_flag[i] is True
+    ]
     train_test_dataset = Subset(study_dataset, train_test_indices)
-    train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
+    train_dataset, test_dataset = random_split(
+        train_test_dataset, [train_prop, test_prop]
+    )
     val_dataset = Subset(study_dataset, val_indices)
 
     # Create the data loaders
@@ -235,18 +254,16 @@ def main():
             exp_name=exp_name,
             mmllm=mmllm,
             device=device,
-
             train_dl=train_dl,
             test_dl=test_dl,
             val_dl=val_dl,
-
             num_epochs=num_epochs,
             learning_rate=learning_rate,
             diversity_loss_weight=diversity_loss_weight,
-            adapter_reg_weight=adapter_reg_weight,
-            
+            encoder_reg_weight=encoder_reg_weight,
             model_dir=mmllm_model_dir,
             tensorboard_dir=tensorboard_dir,
+            enable_diagnostics=enable_diagnostics,  # Pass the flag instead of initialized diagnostics
         )
 
     end_time = time.perf_counter()

@@ -3,10 +3,9 @@ Model utilities for SpeechBCI multimodal language models
 """
 
 from peft import LoraConfig, get_peft_model, TaskType
-from mmllm.model_adapters.transformer_adapter import TransformerAdapter
+from mmllm.llm_encoders.transformer_encoder import TransformerEncoder
 import torch
 import torch.nn as nn
-from .deprecated.MMLLM import MMLLM
 from .MultimodalLLM import MultimodalLLM
 
 from transformers import (
@@ -19,7 +18,7 @@ from transformers import (
 
 # Factory function to create appropriate model based on type
 def create_embedding_model(
-    adapter_type,
+    encoder_type,
     base_model_type,
     input_dim,
     attention_mode,
@@ -33,7 +32,7 @@ def create_embedding_model(
     if base_model_type == "t5":
         tokenizer = T5Tokenizer.from_pretrained("t5-small", legacy=True)
         base_model = T5ForConditionalGeneration.from_pretrained("t5-small")
-        
+
     elif base_model_type == "bart":
         tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
         # Add sentence boundary tokens
@@ -43,16 +42,16 @@ def create_embedding_model(
         # Resize model embeddings to match updated tokenizer
         base_model.resize_token_embeddings(len(tokenizer))
         print("Using standard BART without multilingual support")
-        
+
     else:
         raise ValueError(f"Unsupported model type: {base_model_type}")
-    
-    # Create appropriate adapter based on adapter_type
-    if adapter_type == "attention":
-        adapter = TransformerAdapter(
+
+    # Create appropriate encoder based on encoder_type
+    if encoder_type == "attention":
+        encoder = TransformerEncoder(
             input_dim=input_dim,
             output_dim=base_model.config.hidden_size,
-            adapter_type=adapter_type,
+            encoder_type=encoder_type,
             attention_mode=attention_mode,
             window_size=window_size,
             num_heads=num_heads,
@@ -60,13 +59,13 @@ def create_embedding_model(
             dropout=dropout,
         )
     else:
-        raise ValueError(f"Unsupported adapter type: {adapter_type}")
+        raise ValueError(f"Unsupported encoder type: {encoder_type}")
 
-    # Create an instance of the adapter + base_model
+    # Create an instance of the encoder + base_model
     mmllm = MultimodalLLM(
-        adapter_type=adapter_type,
+        encoder_type=encoder_type,
         model_type=base_model_type,
-        input_adapter=adapter,
+        input_encoder=encoder,
         base_model=base_model,
         tokenizer=tokenizer,
     )

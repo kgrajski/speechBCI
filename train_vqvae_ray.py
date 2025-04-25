@@ -66,7 +66,7 @@ def main():
     data_dir = os.path.join(project_dir, "data/competitionData")
     model_dir = os.path.join(data_dir, "models")
     tensorboard_dir = os.path.join(data_dir, "tensorboard")
-    
+
     ray_log_dir = os.path.join(data_dir, "ray")
     os.makedirs(ray_log_dir, exist_ok=True)
 
@@ -89,7 +89,7 @@ def main():
     # Metrics setup
     metric = "reconstruction_loss_train"
     mode = "min"
-    
+
     # Dynamically set max_t to match the maximum value of num_epochs in the search space
     scheduler = ASHAScheduler(max_t=100, grace_period=10, reduction_factor=2)
 
@@ -102,7 +102,7 @@ def main():
             model_dir=model_dir,
             tensorboard_dir=tensorboard_dir,
             device="cuda" if torch.cuda.is_available() else "cpu",
-            data_dir=data_dir,               # Pass paths instead of data objects
+            data_dir=data_dir,  # Pass paths instead of data objects
             batch_size=batch_size,
             encoder_depth=encoder_depth,
             depth_step_size=depth_step_size,
@@ -115,10 +115,11 @@ def main():
         num_samples=1,  # Ensure each combination is evaluated only once
         storage_path=ray_log_dir,  # Redirect logs to this directory
     )
-    
+
     print("Best hyperparameters found were: ", analysis.best_config)
     print(f"\nTotal elapsed time:  %.4f seconds" % (time.perf_counter() - start_time))
     print("*** " + script_name + " - END ***")
+
 
 if __name__ == "__main__":
     main()

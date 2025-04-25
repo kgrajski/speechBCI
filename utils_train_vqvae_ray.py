@@ -34,15 +34,21 @@ def setup_data_loaders(
     Returns:
         tuple: train_dl, test_dl, val_dl (DataLoaders for training, testing, and validation).
     """
-    
+
     etl_dir = os.path.join(data_dir, "etl", "6v_all")
     study_dataset = SpeechBCIDataSet_3D(etl_dir, encoder_depth, depth_step_size)
 
-    train_test_indices = [i for i in range(len(study_dataset.val_flag)) if not study_dataset.val_flag[i]]
-    val_indices = [i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i]]
-    
+    train_test_indices = [
+        i for i in range(len(study_dataset.val_flag)) if not study_dataset.val_flag[i]
+    ]
+    val_indices = [
+        i for i in range(len(study_dataset.val_flag)) if study_dataset.val_flag[i]
+    ]
+
     train_test_dataset = Subset(study_dataset, train_test_indices)
-    train_dataset, test_dataset = random_split(train_test_dataset, [train_prop, test_prop])
+    train_dataset, test_dataset = random_split(
+        train_test_dataset, [train_prop, test_prop]
+    )
     val_dataset = Subset(study_dataset, val_indices)
 
     train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -64,7 +70,7 @@ def train_vqvae(
 ):
     """
     Train a VQ-VAE model with the given configuration.
-    
+
     Args:
         config (dict): Configuration dictionary containing hyperparameters.
         model_dir (str): Directory to save the model.
@@ -82,7 +88,7 @@ def train_vqvae(
         encoder_depth,
         depth_step_size,
     )
-    
+
     # Model setup
     model = VQVAE(
         config["num_ecog_input_channels"],
@@ -151,7 +157,9 @@ def train(
 
         data_recon_avg.append(recon_error.item())
         vq_loss_avg.append(vq_loss.item())
-        perplexity_avg.append(perplexity.item() / num_embeddings)  # Normalize perplexity
+        perplexity_avg.append(
+            perplexity.item() / num_embeddings
+        )  # Normalize perplexity
 
         # Update tqdm progress bar with current losses
         loop.set_postfix(
@@ -255,7 +263,7 @@ def run_exp(
     print(f"Model directory: {model_dir}")
 
     print("##### Start Exp =", exp_name)
-    #print(model)
+    # print(model)
 
     for iepoch in range(num_epochs):
         print(f"Epoch {iepoch+1}\n-------------------------------")
@@ -289,7 +297,7 @@ def run_exp(
             f"VQ Loss: {test_vq_loss}",
             f"Normalized Perplexity: {test_perplexity}",
         )
-        
+
         tune.report(
             {
                 "reconstruction_loss_train": train_data_recon,
@@ -357,5 +365,5 @@ def run_exp(
         # writer.add_image("Reconstructions", img_grid)
 
         writer.add_graph(model, valid_originals)
-        
+
     writer.close()

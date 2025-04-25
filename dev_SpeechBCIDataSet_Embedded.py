@@ -27,20 +27,27 @@ class SpeechBCIDataSet_Embedded(Dataset):
         etl_dir,
         tokenizer,
         model_type,
-        max_seq_len,
+        max_seq_len,  # For embedding sequences
+        max_label_seq_len,  # For label sequences
         padding_vector,
         transform=None,
         target_transform=None,
     ):
         (
             self.samples,
-            self.attention_masks,
+            self.padding_masks,
             self.labels,
             self.label_ids,
             self.label_masks,
             self.val_flag,
         ) = self.gen_dataset(
-            embed_dir, etl_dir, max_seq_len, padding_vector, model_type, tokenizer
+            embed_dir, 
+            etl_dir, 
+            max_seq_len,
+            max_label_seq_len,  # Add new parameter
+            padding_vector, 
+            model_type, 
+            tokenizer
         )
 
         self.transform = transform
@@ -52,9 +59,9 @@ class SpeechBCIDataSet_Embedded(Dataset):
     def __getitem__(self, idx):
         return {
             "vqvae_embeddings": self.samples[idx].clone().detach(),
-            "attention_mask": self.attention_masks[idx].clone().detach(),
+            "padding_masks": self.padding_masks[idx].clone().detach(),
             "label_embeddings": self.label_ids[idx].clone().detach(),
-            "label_attention_mask": self.label_masks[idx].clone().detach(),
+            "label_padding_mask": self.label_masks[idx].clone().detach(),
             "original_text": self.labels[idx],  # Include original text
         }
 
@@ -67,7 +74,8 @@ class SpeechBCIDataSet_Embedded(Dataset):
         self,
         embeddings_dir,
         label_dir,
-        max_seq_len,
+        max_seq_len,  # For embedding sequences
+        max_label_seq_len,  # For label sequences
         padding_vector,
         model_type,
         tokenizer,
@@ -97,7 +105,7 @@ class SpeechBCIDataSet_Embedded(Dataset):
             samples.extend(tmp_samples)
             labels.extend(tmp_labels)
             val_flag.extend(tmp_val_flag)
-            print(f"Generated {len(tmp_samples)} samples for {sub_dir}.")
+            print(f"Found {len(tmp_samples)} samples for {sub_dir}.")
 
             #
             # Note: samples is a list of trial tensors, one T x E x H x W tensor per trial:
@@ -109,49 +117,54 @@ class SpeechBCIDataSet_Embedded(Dataset):
             #               We've made the choice here that the padding_vector is the average
             #               of the codebook vectors passed in as an argument. This keeps
             #               things very clean where we use ONLY training data - no peeking!
-            #       b.  Generate an attention mask on the original T non-padded values.
+            #       b.  Generate a padding mask on the original T non-padded values.
             #       c.  Position encoding happens in the transformer model.
 
         padded_samples = []
-        sample_attention_masks = []
+        sample_padding_masks = []
         padded_label_ids = []
-        label_attention_masks = []
+        label_padding_masks = []
 
         for sample, label in tqdm(zip(samples, labels), desc="Tokenizing Trial Data"):
 
             # If introducing new model types beyond T5 and BART, may need to
-            # adjust the padding and attention mask handling in light of any
+            # adjust the padding and padding mask handling in light of any
             # possible input length requirements.
             padded, mask = self._pad_sample(sample, max_seq_len, padding_vector)
             padded_samples.append(padded)
-            sample_attention_masks.append(mask)
+            sample_padding_masks.append(mask)
 
-            # Label padding is model-specific, but details are in the method.
-            padded, mask = self._pad_label(label, max_seq_len, model_type, tokenizer)
-            padded_label_ids.append(padded.squeeze())
-            label_attention_masks.append(mask.squeeze())
-            
+            # Pad label sequence with its own max length
+            encoded_labels = self._pad_label(label, max_label_seq_len, model_type, tokenizer)
+            padded_label_ids.append(encoded_labels.input_ids.squeeze())
+            label_padding_masks.append(encoded_labels.attention_mask.squeeze())
+
         #
         # Note that the padded samples and labels are now T x (E*H*W) tensors.
-        # The attention masks are T x 1 tensors.
+        # The padding masks are T x 1 tensors.
         # As a diagnostic, compute the min, max, average, and std of
-        # the attention mas lengths, where attention mask means the
+        # the padding mask lengths, where padding mask means the
         # number of non-zero values in the mask.
-        attention_mask_lengths = [mask.sum().item() for mask in sample_attention_masks]
-        min_len = min(attention_mask_lengths)
-        max_len = max(attention_mask_lengths)
-        avg_len = np.mean(attention_mask_lengths)
-        std_len = np.std(attention_mask_lengths)
-        print(
-            f"Mask: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}"
-        )
+        padding_mask_lengths = [mask.sum().item() for mask in sample_padding_masks]
+        min_len = min(padding_mask_lengths)
+        max_len = max(padding_mask_lengths)
+        avg_len = np.mean(padding_mask_lengths)
+        std_len = np.std(padding_mask_lengths)
+        print(f"Embedding Mask Stats: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}")
+
+        label_mask_lengths = [mask.sum().item() for mask in label_padding_masks]
+        min_len = min(label_mask_lengths)
+        max_len = max(label_mask_lengths)
+        avg_len = np.mean(label_mask_lengths)
+        std_len = np.std(label_mask_lengths)
+        print(f"Label Mask Stats: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}")
 
         return (
             padded_samples,
-            sample_attention_masks,
+            sample_padding_masks,
             labels,
             padded_label_ids,
-            label_attention_masks,
+            label_padding_masks,
             val_flag,
         )
 
@@ -190,55 +203,42 @@ class SpeechBCIDataSet_Embedded(Dataset):
             )
             sample = sample[:max_seq_len]
             seq_len = max_seq_len
-            
+
         # Sample data is coming in as T x E x H x W
         # We want to flatten to T x (E*H*W)
         sample = sample.view(seq_len, -1)
-            
+
         # The padding vector is coming in as [E]
         # 1. First, repeat it H*W times to get a single flattened row
         flattened_padding = padding_vector.repeat(h * w)  # Shape: [E*H*W]
 
         # 2. Create a new tensor filled with the padding value
         # Use repeat() instead of expand() to actually allocate new memory
-        padded_sample = flattened_padding.unsqueeze(0).repeat(max_seq_len, 1)  # Shape: [max_seq_len, E*H*W]
+        padded_sample = flattened_padding.unsqueeze(0).repeat(
+            max_seq_len, 1
+        )  # Shape: [max_seq_len, E*H*W]
 
         # Copy original data (or truncate)
         copy_len = min(seq_len, max_seq_len)
         padded_sample[:copy_len] = sample[:copy_len]
 
-        # Create attention mask (1 for real data, 0 for padding)
+        # Create padding mask (1 for real data, 0 for padding)
         mask = torch.zeros(max_seq_len, dtype=torch.bool)
         mask[:copy_len] = 1
 
         return padded_sample, mask
 
     @staticmethod
-    def _pad_label(label, max_seq_len, model_type, tokenizer):
-        """Tokenize and pad label text with model-specific handling."""
-        # Apply sentence boundary tokens for BART
-        if model_type.lower() == "bart":
-            processed_label = f"<sentence> {label} </sentence>"
-        else:
-            processed_label = label
-        
-        # Tokenize with appropriate parameters
+    def _pad_label(label, max_length, model_type, tokenizer):
+        """Pad label to max_length using tokenizer."""
         encoded_labels = tokenizer(
-            processed_label,
+            label,
+            max_length=max_length,
             padding="max_length",
-            max_length=max_seq_len,
             truncation=True,
             return_tensors="pt",
         )
-        
-        # Handle padding token IDs based on model type
-        if model_type.lower() == "t5":
-            input_ids = encoded_labels.input_ids
-            input_ids[input_ids == tokenizer.pad_token_id] = -100
-        else:
-            input_ids = encoded_labels.input_ids
-            
-        return input_ids, encoded_labels.attention_mask
+        return encoded_labels  # Return the tokenizer output directly
 
     def preprocess_target_text(self, text, model_type):
         """Preprocess target text with appropriate sentence markers based on model type."""
