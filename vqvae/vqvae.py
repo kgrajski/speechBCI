@@ -43,9 +43,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, random_split
 
 from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
-from Vqvae_Simple3D import VQVAE
-from utils_vqvae import run_exp
-from utils_embedding import embed_studydata
+from vqvae.Vqvae_Simple3D import VQVAE
+from vqvae.utils_vqvae import run_exp
+from vqvae.utils_embedding import embed_studydata
 
 
 def main():
@@ -113,7 +113,7 @@ def main():
     learning_rate = 1e-3
 
     # Indicate whether we are training, embedding, or both
-    training = False
+    training = True
     encoding = True
 
     #

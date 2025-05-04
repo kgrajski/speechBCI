@@ -12,7 +12,7 @@ from tabulate import tabulate
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from Sentence import Sentence
+from etl.Sentence import Sentence
 from transformers import T5Tokenizer
 
 
@@ -33,22 +33,22 @@ class SpeechBCIDataSet_Embedded(Dataset):
         transform=None,
         target_transform=None,
     ):
-        (
-            self.samples,
-            self.padding_masks,
-            self.labels,
-            self.label_ids,
-            self.label_masks,
-            self.val_flag,
-        ) = self.gen_dataset(
-            embed_dir, 
-            etl_dir, 
+        dataset = self.gen_dataset(
+            embed_dir,
+            etl_dir,
             max_seq_len,
             max_label_seq_len,  # Add new parameter
-            padding_vector, 
-            model_type, 
-            tokenizer
+            padding_vector,
+            model_type,
+            tokenizer,
         )
+        self.trial_ids = dataset["trial_ids"]
+        self.samples = dataset["padded_samples"]
+        self.padding_masks = dataset["sample_padding_masks"]
+        self.labels = dataset["labels"]
+        self.label_ids = dataset["padded_label_ids"]
+        self.label_masks = dataset["label_padding_masks"]
+        self.val_flag = dataset["val_flag"]
 
         self.transform = transform
         self.target_transform = target_transform
@@ -58,8 +58,10 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
     def __getitem__(self, idx):
         return {
+            "trial_id": self.trial_ids[idx],
             "vqvae_embeddings": self.samples[idx].clone().detach(),
             "padding_masks": self.padding_masks[idx].clone().detach(),
+            "positional_encodings": self.samples[idx].clone().detach(),
             "label_embeddings": self.label_ids[idx].clone().detach(),
             "label_padding_mask": self.label_masks[idx].clone().detach(),
             "original_text": self.labels[idx],  # Include original text
@@ -80,7 +82,8 @@ class SpeechBCIDataSet_Embedded(Dataset):
         model_type,
         tokenizer,
     ):
-
+        
+        trial_ids = []
         samples = []
         labels = []
         val_flag = []
@@ -99,9 +102,10 @@ class SpeechBCIDataSet_Embedded(Dataset):
             val_flag_value = sub_dir == "test"
 
             # Collect all of the trial embedded data and labels
-            tmp_samples, tmp_labels, tmp_val_flag = self._get_trial_data(
+            tmp_ids, tmp_samples, tmp_labels, tmp_val_flag = self._get_trial_data(
                 trial_dir, label_dir, trial_list, val_flag_value
             )
+            trial_ids.extend(tmp_ids)
             samples.extend(tmp_samples)
             labels.extend(tmp_labels)
             val_flag.extend(tmp_val_flag)
@@ -122,6 +126,7 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
         padded_samples = []
         sample_padding_masks = []
+        sample_positional_encodings = []
         padded_label_ids = []
         label_padding_masks = []
 
@@ -133,9 +138,17 @@ class SpeechBCIDataSet_Embedded(Dataset):
             padded, mask = self._pad_sample(sample, max_seq_len, padding_vector)
             padded_samples.append(padded)
             sample_padding_masks.append(mask)
+            
+            # Create the positional encoding for the sample
+            pos_encoding = torch.arange(padded.shape[0], dtype=torch.float32)
+            pos_encoding = pos_encoding.unsqueeze(1)
+            pos_encoding = pos_encoding.repeat(1, padded.shape[1])
+            sample_positional_encodings.append(pos_encoding)
 
             # Pad label sequence with its own max length
-            encoded_labels = self._pad_label(label, max_label_seq_len, model_type, tokenizer)
+            encoded_labels = self._pad_label(
+                label, max_label_seq_len, model_type, tokenizer
+            )
             padded_label_ids.append(encoded_labels.input_ids.squeeze())
             label_padding_masks.append(encoded_labels.attention_mask.squeeze())
 
@@ -150,27 +163,34 @@ class SpeechBCIDataSet_Embedded(Dataset):
         max_len = max(padding_mask_lengths)
         avg_len = np.mean(padding_mask_lengths)
         std_len = np.std(padding_mask_lengths)
-        print(f"Embedding Mask Stats: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}")
+        print(
+            f"Embedding Mask Stats: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}"
+        )
 
         label_mask_lengths = [mask.sum().item() for mask in label_padding_masks]
         min_len = min(label_mask_lengths)
         max_len = max(label_mask_lengths)
         avg_len = np.mean(label_mask_lengths)
         std_len = np.std(label_mask_lengths)
-        print(f"Label Mask Stats: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}")
-
-        return (
-            padded_samples,
-            sample_padding_masks,
-            labels,
-            padded_label_ids,
-            label_padding_masks,
-            val_flag,
+        print(
+            f"Label Mask Stats: min: {min_len}, max: {max_len}, avg: {avg_len}, std: {std_len}"
         )
+
+        return {
+            "trial_ids": trial_ids,
+            "padded_samples": padded_samples,
+            "sample_padding_masks": sample_padding_masks,
+            "sample_positional_encodings": sample_positional_encodings,
+            "labels": labels,
+            "padded_label_ids": padded_label_ids,
+            "label_padding_masks": label_padding_masks,
+            "val_flag": val_flag,
+        }
 
     @staticmethod
     def _get_trial_data(trial_dir, label_dir, trial_list, val_flag_value):
 
+        trial_ids = []
         samples = []
         labels = []
         val_flag = []
@@ -182,6 +202,7 @@ class SpeechBCIDataSet_Embedded(Dataset):
             )
             text_data = Sentence()
             text_data.load(os.path.join(label_dir, f"{trial}_sentenceText.csv"))
+            trial_ids.append(trial)
             samples.append(trial_data)
             labels.append(text_data.sentence_txt)
             val_flag.append(val_flag_value)
@@ -190,7 +211,7 @@ class SpeechBCIDataSet_Embedded(Dataset):
         print(
             f"Generated {len(samples)} samples with max input length {max_input_seq_len}."
         )
-        return samples, labels, val_flag
+        return trial_ids, samples, labels, val_flag
 
     @staticmethod
     def _pad_sample(sample, max_seq_len, padding_vector):

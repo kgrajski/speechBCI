@@ -25,8 +25,8 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from SpeechBCI import ElectrodeArray
-from Sentence import Sentence
+from etl.SpeechBCI import ElectrodeArray
+from etl.Sentence import Sentence
 
 
 class SpeechBCIDataSet_3D(Dataset):

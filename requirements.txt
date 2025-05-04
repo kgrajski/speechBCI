@@ -35,6 +35,7 @@ jsonschema-specifications==2024.10.1
 jupyter_client==8.6.3
 jupyter_core==5.7.2
 jupyterlab_widgets==3.0.13
+kaleido==0.2.1
 kiwisolver==1.4.8
 llvmlite==0.44.0
 Markdown==3.7
@@ -90,7 +91,7 @@ pytz==2025.1
 PyYAML==6.0.2
 pyzmq==26.2.1
 RapidFuzz==3.12.2
-ray==2.43.0
+ray==2.44.1
 referencing==0.36.2
 regex==2024.11.6
 requests==2.32.3
@@ -112,6 +113,7 @@ threadpoolctl==3.5.0
 tokenizers==0.21.1
 tomli==2.2.1
 torch==2.6.0
+torch-tb-profiler==0.4.3
 torchaudio==2.6.0
 torchsummary==1.5.1
 torchvision==0.21.0

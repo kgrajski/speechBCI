@@ -9,7 +9,7 @@ import os
 import torch
 import numpy as np
 from torch.utils.data import Dataset
-from Sentence import Sentence
+from etl.Sentence import Sentence
 
 
 class SpeechBCIDataSet_Raw(Dataset):

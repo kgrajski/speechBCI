@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Subset, random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from ray import tune
-from Vqvae_Simple3D import VQVAE
+from vqvae.Vqvae_Simple3D import VQVAE
 
 
 def setup_data_loaders(

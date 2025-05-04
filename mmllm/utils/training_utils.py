@@ -7,15 +7,15 @@ import torch
 import gc
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from mmllm.data_utils import calculate_wer
-from mmllm.data_utils import process_generated_texts, log_metrics
+from mmllm.utils.data_utils import calculate_wer
+from mmllm.utils.data_utils import process_generated_texts, log_metrics
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import numpy as np
 import time
 from typing import Dict, Any, Optional, List, Tuple
-from mmllm.diagnostic_utils import ModelDiagnostics
+from mmllm.diagnostics import MMLLM_Diagnostics
 
 
 def training(
@@ -23,63 +23,51 @@ def training(
     mmllm,
     dataloader,
     optimizer,
-    diversity_loss_weight,
-    encoder_reg_weight,
     device,
 ):
     """Training loop for the multimodal language model."""
     mmllm.to(device)
     mmllm.base_model.eval()  # Make sure model is in eval mode
-    mmllm.input_encoder.train()  # Make sure encoder is in training mode
+    mmllm.input_adapter.train()  # Make sure encoder is in training mode
+
+    # Get batch size from dataloader
+    batch_size = dataloader.batch_size
 
     total_loss = 0
     total_base_model_loss = 0
     total_diversity_loss = 0
     total_reg_loss = 0
     steps = 0
+    accumulated_steps = 0
 
     for batch in tqdm(dataloader, desc=description):
-        # Process batch - forward step
-        inputs = batch["vqvae_embeddings"].to(device)
-        padding_masks = batch["padding_masks"].to(device)
-        labels = batch["label_embeddings"].to(device)
 
-        # Zero gradients
+        inputs = batch["vqvae_embeddings"].to(device)  # Add batch dim
+        padding_masks = batch["padding_masks"].to(device)
+        positional_encodings = batch["positional_encodings"].to(device)
+        labels = batch["label_embeddings"].to(device)
+        
+        # Clear gradients before each forward pass
         optimizer.zero_grad(set_to_none=True)
 
-        # Forward pass through model
-        encoder_outputs, mmllm_outputs = mmllm(inputs, padding_masks, labels)  # Uses __call__ which calls forward
+        # Forward pass through model - returns encoder outputs and all losses
+        adapter_outputs, losses = mmllm(inputs, padding_masks, positional_encodings, labels)
 
-        # Compute losses
-        batch_size = encoder_outputs.shape[0]
-        flattened_outputs = encoder_outputs.reshape(batch_size, -1)
-        
-        # Compute diversity loss on encoder outputs
-        diversity_loss = -torch.var(flattened_outputs, dim=0).mean()  # Variance across batch
-        diversity_loss *= diversity_loss_weight
-        
-        # Regularization loss
-        reg_loss = torch.norm(encoder_outputs, p=2) / encoder_outputs.size(0)
-        reg_loss *= encoder_reg_weight
-        
         # Total loss
-        loss = mmllm_outputs.loss + diversity_loss + reg_loss
+        loss = losses["loss"]
 
         # Backward pass
         loss.backward()
 
-        # Optimize
-        optimizer.step()
-
         # Track losses
-        total_loss += loss
-        total_base_model_loss += mmllm_outputs.loss
-        total_diversity_loss += diversity_loss
-        total_reg_loss += reg_loss
+        total_loss += losses["loss"]  # Already scaled in forward
+        total_base_model_loss += losses["main_loss"]
+        total_diversity_loss += losses["diversity_loss"]
+        total_reg_loss += losses["reg_loss"]
         steps += 1
 
         # Clean up
-        del inputs, padding_masks, labels, encoder_outputs, mmllm_outputs
+        del inputs, padding_masks, labels, adapter_outputs, losses
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -107,7 +95,7 @@ def generation(
     """Generate text from the model and calculate WER metrics."""
     mmllm.to(device)
     mmllm.base_model.eval()  # Make sure model is in eval mode
-    mmllm.input_encoder.eval()  # Make sure encoder is in eval mode
+    mmllm.input_adapter.eval()  # Make sure encoder is in eval mode
 
     all_preds = []
     all_original_texts = []
@@ -133,6 +121,7 @@ def generation(
         for batch in tqdm(dataloader, desc=description):
             inputs = batch["vqvae_embeddings"].to(device)
             padding_masks = batch["padding_masks"].to(device)
+            positional_encodings = batch["positional_encodings"].to(device)
             labels = batch["label_embeddings"].to(device)
             original_texts = batch["original_text"]
 
@@ -140,6 +129,7 @@ def generation(
             generated_ids = mmllm.generate(  # Direct call to generate method
                 input_embeddings=inputs,
                 padding_masks=padding_masks,
+                positional_encodings=positional_encodings,
                 **generation_kwargs,
             )
 
@@ -177,6 +167,7 @@ def generation(
         "num_uniq_pred_words": num_uniq_pred_words,
     }
 
+
 def run_exp(
     exp_name,
     mmllm,  # model is an instance of MultimodalLLM: encoder + base
@@ -186,16 +177,16 @@ def run_exp(
     val_dl,
     num_epochs,
     learning_rate,
-    diversity_loss_weight,
-    encoder_reg_weight,
     model_dir,
     tensorboard_dir,
-    enable_diagnostics,
+    enable_diags,
     momentum=0.9,
     lr_decay_factor=0.5,
     lr_decay_epochs=10,
     loss_plateau_epochs=5,
     loss_threshold=0.001,
+    
+    
 ):
     """Runs the multimodal language model experiment.
 
@@ -234,36 +225,35 @@ def run_exp(
     # Clean-up before starting
     torch.cuda.empty_cache()
     gc.collect()
-    
-        # Set up optimizer with parameters from the encoder - that is all we're training
-    optimizer_params = list(mmllm.input_encoder.parameters())
+
+    # Set up optimizer with parameters from the encoder - that is all we're training
+    optimizer_params = list(mmllm.input_adapter.parameters())
     optimizer = torch.optim.AdamW(
-        optimizer_params,
-        lr=learning_rate,
-        betas=(momentum, 0.999))
+        optimizer_params, lr=learning_rate, betas=(momentum, 0.999)
+    )
 
     # Learning rate scheduler setup
     scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer,
-        step_size=lr_decay_epochs,
-        gamma=lr_decay_factor)
+        optimizer, step_size=lr_decay_epochs, gamma=lr_decay_factor
+    )
 
     # Track loss history
-    best_train_loss = float('inf')
+    best_train_loss = float("inf")
     epochs_since_improvement = 0
 
     # Initialize diagnostics
-    if enable_diagnostics:
-        diagnostics = ModelDiagnostics(
-            model=mmllm.base_model,
-            encoder=mmllm.input_encoder,
-            tokenizer=mmllm.tokenizer,
-            writer=writer,
-            output_dir=model_dir
-        )
+    if enable_diags:
+        diagnostics = MMLLM_Diagnostics()
 
     # Conduct the main loop
     for epoch in range(num_epochs):
+
+        # If enabled, dump the embedded inputs and corresponding encoder outputs
+        if enable_diags:
+            diagnostics.attention_heatmap(mmllm, test_dl, epoch, model_dir, device)
+            diagnostics.weight_heatmap(mmllm, epoch, model_dir)
+            diagnostics.adapter_activation_histogram(mmllm, test_dl, epoch, model_dir, device)
+            diagnostics.embed_encode_comp_plots(mmllm, test_dl, epoch, model_dir, device)
 
         # Evaluate losses on training data and do a training step
         description = "loss_train"
@@ -272,18 +262,18 @@ def run_exp(
             mmllm,
             train_dl,
             optimizer,
-            diversity_loss_weight,
-            encoder_reg_weight,
             device,
         )
         log_metrics(writer, exp_name, description, train_loss, epoch)
 
         # Report current learning rate and check for loss plateau
-        log_metrics(writer,
-                    exp_name,
-                    'learing_rate',
-                    {'learning_rate': optimizer.param_groups[0]['lr']},
-                    epoch)
+        log_metrics(
+            writer,
+            exp_name,
+            "learing_rate",
+            {"learning_rate": optimizer.param_groups[0]["lr"]},
+            epoch,
+        )
         if train_loss["total"] < best_train_loss - loss_threshold:
             best_train_loss = train_loss["total"]
             epochs_since_improvement = 0
@@ -292,7 +282,7 @@ def run_exp(
             if epochs_since_improvement >= loss_plateau_epochs:
                 # Reduce learning rate if loss plateaus
                 for param_group in optimizer.param_groups:
-                    param_group['lr'] *= lr_decay_factor
+                    param_group["lr"] *= lr_decay_factor
                 print(f"Epoch {epoch}: Loss plateau: lr to {param_group['lr']}")
                 epochs_since_improvement = 0  # Reset counter
 
@@ -315,13 +305,10 @@ def run_exp(
         # Step the scheduler
         scheduler.step()
 
-        # Capture epoch diagnostics
-        diagnostics.capture_epoch_diagnostics(mmllm, train_dl, epoch)
-
     # After training loop - save final model
     mmllm.save(model_dir, exp_name, suffix="final")
 
-        # Generate and log word-level performance on the validation set
+    # Generate and log word-level performance on the validation set
     description = "gen_val"
     gen_val = generation(
         description,
@@ -339,11 +326,6 @@ def run_exp(
     # Clean-up before exiting
     torch.cuda.empty_cache()
     gc.collect()
-
-    # Final diagnostics
-    print("\nRunning final diagnostics...")
-    diagnostics.analyze_mode_collapse()
-    print("Diagnostics complete. Check TensorBoard for detailed metrics.")
-
+    
     # Return the model
     return mmllm

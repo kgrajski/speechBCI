@@ -9,7 +9,9 @@ class LabelAnalyzer:
     """
 
     def __init__(
-        self, labels, train_test_flags=None, 
+        self,
+        labels,
+        train_test_flags=None,
     ):
         """Initialize with dataset labels and optional train/test flags."""
         self.labels = labels

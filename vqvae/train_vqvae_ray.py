@@ -39,7 +39,7 @@ import time
 import torch
 from ray import tune
 from ray.tune.schedulers import ASHAScheduler
-from utils_train_vqvae_ray import train_vqvae, setup_data_loaders
+from vqvae.utils_train_vqvae_ray import train_vqvae, setup_data_loaders
 
 
 def main():
