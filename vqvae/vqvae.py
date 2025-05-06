@@ -31,18 +31,15 @@ Functions:
 #
 
 import sys
-
-sys.path.append("./")
-
-import gc
-import numpy as np
 import os
 import time
+import gc
+import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, random_split
 
-from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
+from vqvae.SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
 from vqvae.Vqvae_Simple3D import VQVAE
 from vqvae.utils_vqvae import run_exp
 from vqvae.utils_embedding import embed_studydata

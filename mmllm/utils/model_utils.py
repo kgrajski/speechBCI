@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from mmllm.llm_adapters.Adapter import Adapter
-from ..MMLLM import MultimodalLLM
+from mmllm.MMLLM import MultimodalLLM
 from transformers import (BartTokenizer, BartForConditionalGeneration)
 
 

@@ -54,16 +54,13 @@ owser to http://localhost:6006/
 
 """
 
-import sys
 import os
 import time
 import gc
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, random_split, Subset  # Added Subset
+from torch.utils.data import DataLoader, random_split, Subset
 
-# Add current directory to Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from mmllm.dev_SpeechBCIDataSet_Embedded import SpeechBCIDataSet_Embedded
 from mmllm.utils.data_utils import get_vqvae_codebook_average
 from mmllm.utils.label_utils import LabelAnalyzer
@@ -145,7 +142,7 @@ def main():
 
     # Set up the model parameters
     batch_size = 16
-    enable_diags = True  # Added diagnostic flag
+    enable_diags = False  # Added diagnostic flag
     learning_rate = 1e-5
     max_input_seq_len = 212
     max_label_seq_len = 32

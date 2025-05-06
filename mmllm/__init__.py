@@ -6,10 +6,10 @@ multimodal language models for speech BCI data.
 """
 
 # Make key components available at the package level
-from mmllm.utils.model_utils import create_adapter_encoder_decoder_model
-from mmllm.utils.training_utils import run_exp, training, generation, log_metrics
-from mmllm.utils.data_utils import get_vqvae_codebook_average, calculate_wer
-from mmllm.MMLLM import MultimodalLLM
+from .utils.model_utils import create_adapter_encoder_decoder_model
+from .utils.training_utils import run_exp, training, generation, log_metrics
+from .utils.data_utils import get_vqvae_codebook_average, calculate_wer
+from .MMLLM import MultimodalLLM
 
 __all__ = [
     "create_embedding_model",

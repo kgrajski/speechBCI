@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import umap
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
-from SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
+from vqvae.SpeechBCIDataSet_3D import SpeechBCIDataSet_3D
 from torch.utils.data import DataLoader, Subset, random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm

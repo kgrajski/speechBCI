@@ -352,7 +352,9 @@ class MMLLM_Diagnostics:
         """
         Visualize average attention weights for a given layer and head.
         """
-        import plotly.graph_objects as go
+        output_dir = os.path.join(output_dir, "attention_heatmap")
+        os.makedirs(output_dir, exist_ok=True)
+        
         mmllm.base_model.eval()
         attention_weights = []
         for batch in dataloader:
@@ -383,7 +385,8 @@ class MMLLM_Diagnostics:
         """
         Visualize the weights of a given module as a heatmap.
         """
-        import plotly.graph_objects as go
+        output_dir = os.path.join(output_dir, "weight_heatmap")
+        os.makedirs(output_dir, exist_ok=True)
         module = getattr(mmllm, module_name)
         for name, param in module.named_parameters():
             if param.ndim == 2:  # Only plot 2D weights
@@ -398,7 +401,8 @@ class MMLLM_Diagnostics:
         """
         Plot histogram of adapter activations.
         """
-        import plotly.graph_objects as go
+        output_dir = os.path.join(output_dir, "adapter_activation_histogram")
+        os.makedirs(output_dir, exist_ok=True)
         mmllm.input_adapter.eval()
         activations = []
         for batch in dataloader:

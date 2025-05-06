@@ -1,0 +1,9 @@
+torch
+numpy
+pandas
+transformers
+tensorboard
+tqdm
+matplotlib
+umap-learn
+ray[tune]

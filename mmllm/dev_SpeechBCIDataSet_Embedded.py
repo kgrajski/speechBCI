@@ -11,6 +11,7 @@ import string
 from tabulate import tabulate
 import torch
 from torch.utils.data import Dataset
+from torch.nn.modules.transformer import PositionalEncoding
 from tqdm import tqdm
 from etl.Sentence import Sentence
 from transformers import T5Tokenizer
@@ -33,11 +34,17 @@ class SpeechBCIDataSet_Embedded(Dataset):
         transform=None,
         target_transform=None,
     ):
+        # Create positional encoding once for the maximum sequence length
+        self.pos_encoder = PositionalEncoding(padding_vector.shape[0], dropout=0.0)
+        # Create a dummy input to get the positional encodings
+        dummy_input = torch.zeros(max_seq_len, 1, padding_vector.shape[0])
+        self.positional_encodings = self.pos_encoder(dummy_input).squeeze(1)  # Shape: [max_seq_len, embedding_dim]
+
         dataset = self.gen_dataset(
             embed_dir,
             etl_dir,
             max_seq_len,
-            max_label_seq_len,  # Add new parameter
+            max_label_seq_len,
             padding_vector,
             model_type,
             tokenizer,
@@ -61,7 +68,7 @@ class SpeechBCIDataSet_Embedded(Dataset):
             "trial_id": self.trial_ids[idx],
             "vqvae_embeddings": self.samples[idx].clone().detach(),
             "padding_masks": self.padding_masks[idx].clone().detach(),
-            "positional_encodings": self.samples[idx].clone().detach(),
+            "positional_encodings": self.positional_encodings.clone().detach(),  # Use the pre-computed encodings
             "label_embeddings": self.label_ids[idx].clone().detach(),
             "label_padding_mask": self.label_masks[idx].clone().detach(),
             "original_text": self.labels[idx],  # Include original text
@@ -126,26 +133,15 @@ class SpeechBCIDataSet_Embedded(Dataset):
 
         padded_samples = []
         sample_padding_masks = []
-        sample_positional_encodings = []
         padded_label_ids = []
         label_padding_masks = []
 
         for sample, label in tqdm(zip(samples, labels), desc="Tokenizing Trial Data"):
-
-            # If introducing new model types beyond T5 and BART, may need to
-            # adjust the padding and padding mask handling in light of any
-            # possible input length requirements.
             padded, mask = self._pad_sample(sample, max_seq_len, padding_vector)
             padded_samples.append(padded)
             sample_padding_masks.append(mask)
-            
-            # Create the positional encoding for the sample
-            pos_encoding = torch.arange(padded.shape[0], dtype=torch.float32)
-            pos_encoding = pos_encoding.unsqueeze(1)
-            pos_encoding = pos_encoding.repeat(1, padded.shape[1])
-            sample_positional_encodings.append(pos_encoding)
 
-            # Pad label sequence with its own max length
+            # Pad label sequence
             encoded_labels = self._pad_label(
                 label, max_label_seq_len, model_type, tokenizer
             )
@@ -180,7 +176,6 @@ class SpeechBCIDataSet_Embedded(Dataset):
             "trial_ids": trial_ids,
             "padded_samples": padded_samples,
             "sample_padding_masks": sample_padding_masks,
-            "sample_positional_encodings": sample_positional_encodings,
             "labels": labels,
             "padded_label_ids": padded_label_ids,
             "label_padding_masks": label_padding_masks,

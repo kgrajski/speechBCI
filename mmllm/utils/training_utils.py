@@ -7,8 +7,7 @@ import torch
 import gc
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from mmllm.utils.data_utils import calculate_wer
-from mmllm.utils.data_utils import process_generated_texts, log_metrics
+from mmllm.utils.data_utils import calculate_wer, process_generated_texts, log_metrics
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -18,12 +17,39 @@ from typing import Dict, Any, Optional, List, Tuple
 from mmllm.diagnostics import MMLLM_Diagnostics
 
 
+def print_adapter_params(mmllm, epoch: int, step: int):
+    """Print adapter parameter statistics for monitoring."""
+    print(f"\nEpoch {epoch}, Step {step} - Adapter Parameters:")
+    for name, param in mmllm.input_adapter.named_parameters():
+        if param.requires_grad:
+            print(f"{name}:")
+            print(f"  Mean: {param.data.mean().item():.6f}")
+            print(f"  Std: {param.data.std().item():.6f}")
+            print(f"  Min: {param.data.min().item():.6f}")
+            print(f"  Max: {param.data.max().item():.6f}")
+
+
+def check_gradients(mmllm, epoch: int, step: int):
+    """Check gradient statistics for monitoring."""
+    print(f"\nEpoch {epoch}, Step {step} - Gradient Statistics:")
+    for name, param in mmllm.input_adapter.named_parameters():
+        if param.grad is not None:
+            grad_norm = param.grad.norm().item()
+            grad_mean = param.grad.mean().item()
+            grad_std = param.grad.std().item()
+            print(f"{name}:")
+            print(f"  Norm: {grad_norm:.6f}")
+            print(f"  Mean: {grad_mean:.6f}")
+            print(f"  Std: {grad_std:.6f}")
+
+
 def training(
     description,
     mmllm,
     dataloader,
     optimizer,
     device,
+    epoch: int = 0,  # Add epoch parameter for monitoring
 ):
     """Training loop for the multimodal language model."""
     mmllm.to(device)
@@ -40,8 +66,10 @@ def training(
     steps = 0
     accumulated_steps = 0
 
-    for batch in tqdm(dataloader, desc=description):
+    # Print initial adapter parameters
+    print_adapter_params(mmllm, epoch, 0)
 
+    for batch in tqdm(dataloader, desc=description):
         inputs = batch["vqvae_embeddings"].to(device)  # Add batch dim
         padding_masks = batch["padding_masks"].to(device)
         positional_encodings = batch["positional_encodings"].to(device)
@@ -59,12 +87,24 @@ def training(
         # Backward pass
         loss.backward()
 
+        # Check gradients before clipping
+        check_gradients(mmllm, epoch, steps)
+
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(mmllm.input_adapter.parameters(), max_norm=1.0)
+
+        # Optimizer step
+        optimizer.step()
+
         # Track losses
         total_loss += losses["loss"]  # Already scaled in forward
         total_base_model_loss += losses["main_loss"]
         total_diversity_loss += losses["diversity_loss"]
         total_reg_loss += losses["reg_loss"]
         steps += 1
+
+        # Print adapter parameters periodically
+        print_adapter_params(mmllm, epoch, steps)
 
         # Clean up
         del inputs, padding_masks, labels, adapter_outputs, losses
@@ -263,6 +303,7 @@ def run_exp(
             train_dl,
             optimizer,
             device,
+            epoch,  # Pass the current epoch number
         )
         log_metrics(writer, exp_name, description, train_loss, epoch)
 
