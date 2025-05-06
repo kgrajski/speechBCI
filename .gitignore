@@ -10,7 +10,6 @@ __pycache__/
 cache/
 checkpoints/
 data/
-etl/
 figs/
 logs/
 loss/
