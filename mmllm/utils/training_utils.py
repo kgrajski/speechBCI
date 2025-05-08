@@ -2,18 +2,11 @@
 Training and evaluation utilities for SpeechBCI multimodal language models
 """
 
-import os
 import torch
 import gc
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from mmllm.utils.data_utils import calculate_wer, process_generated_texts, log_metrics
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-import numpy as np
-import time
-from typing import Dict, Any, Optional, List, Tuple
 from mmllm.diagnostics import MMLLM_Diagnostics
 
 
@@ -67,7 +60,7 @@ def training(
     accumulated_steps = 0
 
     # Print initial adapter parameters
-    print_adapter_params(mmllm, epoch, 0)
+    #print_adapter_params(mmllm, epoch, 0)
 
     for batch in tqdm(dataloader, desc=description):
         inputs = batch["vqvae_embeddings"].to(device)  # Add batch dim
@@ -88,7 +81,7 @@ def training(
         loss.backward()
 
         # Check gradients before clipping
-        check_gradients(mmllm, epoch, steps)
+        #check_gradients(mmllm, epoch, steps)
 
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(mmllm.input_adapter.parameters(), max_norm=1.0)
@@ -104,7 +97,7 @@ def training(
         steps += 1
 
         # Print adapter parameters periodically
-        print_adapter_params(mmllm, epoch, steps)
+        #print_adapter_params(mmllm, epoch, steps)
 
         # Clean up
         del inputs, padding_masks, labels, adapter_outputs, losses
@@ -290,10 +283,13 @@ def run_exp(
 
         # If enabled, dump the embedded inputs and corresponding encoder outputs
         if enable_diags:
+            if epoch == 0:
+                diagnostics.position_encoding_heatmap(test_dl, model_dir)
             diagnostics.attention_heatmap(mmllm, test_dl, epoch, model_dir, device)
             diagnostics.weight_heatmap(mmllm, epoch, model_dir)
             diagnostics.adapter_activation_histogram(mmllm, test_dl, epoch, model_dir, device)
             diagnostics.embed_encode_comp_plots(mmllm, test_dl, epoch, model_dir, device)
+
 
         # Evaluate losses on training data and do a training step
         description = "loss_train"

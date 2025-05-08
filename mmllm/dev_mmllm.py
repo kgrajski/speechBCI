@@ -142,11 +142,11 @@ def main():
 
     # Set up the model parameters
     batch_size = 16
-    enable_diags = False  # Added diagnostic flag
-    learning_rate = 1e-5
+    enable_diags = True  # Added diagnostic flag
+    learning_rate = 1e-3
     max_input_seq_len = 212
     max_label_seq_len = 32
-    num_epochs = 10
+    num_epochs = 100
     test_prop = 0.05
     train_prop = 1 - test_prop
     training = True

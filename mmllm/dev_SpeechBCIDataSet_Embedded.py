@@ -8,12 +8,12 @@ import math
 import numpy as np
 import os
 import string
-from tabulate import tabulate
 import torch
-from torch.utils.data import Dataset
-from torch.nn.modules.transformer import PositionalEncoding
-from tqdm import tqdm
+
 from etl.Sentence import Sentence
+from tabulate import tabulate
+from torch.utils.data import Dataset
+from tqdm import tqdm
 from transformers import T5Tokenizer
 
 
@@ -34,12 +34,8 @@ class SpeechBCIDataSet_Embedded(Dataset):
         transform=None,
         target_transform=None,
     ):
-        # Create positional encoding once for the maximum sequence length
-        self.pos_encoder = PositionalEncoding(padding_vector.shape[0], dropout=0.0)
-        # Create a dummy input to get the positional encodings
-        dummy_input = torch.zeros(max_seq_len, 1, padding_vector.shape[0])
-        self.positional_encodings = self.pos_encoder(dummy_input).squeeze(1)  # Shape: [max_seq_len, embedding_dim]
 
+        # Generate the dataset of embedded trials
         dataset = self.gen_dataset(
             embed_dir,
             etl_dir,
@@ -56,6 +52,13 @@ class SpeechBCIDataSet_Embedded(Dataset):
         self.label_ids = dataset["padded_label_ids"]
         self.label_masks = dataset["label_padding_masks"]
         self.val_flag = dataset["val_flag"]
+        self.max_seq_len = max_seq_len
+        self.max_label_seq_len = max_label_seq_len
+        
+        # Generate positional encodings as a separate tensor
+        # This is a fixed tensor that will be reused for all samples
+        adapter_input_dim = self.samples[0].shape[1]
+        self.positional_encodings = self.gen_pos_encodings(max_seq_len, adapter_input_dim)
 
         self.transform = transform
         self.target_transform = target_transform
@@ -255,13 +258,19 @@ class SpeechBCIDataSet_Embedded(Dataset):
             return_tensors="pt",
         )
         return encoded_labels  # Return the tokenizer output directly
-
-    def preprocess_target_text(self, text, model_type):
-        """Preprocess target text with appropriate sentence markers based on model type."""
-        if model_type == "bart":
-            # For BART: we'll wrap the target text in sentence tags
-            # BART already adds <s> and </s> tokens, but we want sentence-level markers
-            return f"<sentence> {text} </sentence>"
-        else:
-            # For T5 or other models, return unchanged
-            return text
+    
+        
+    @staticmethod
+    def gen_pos_encodings(max_seq_len, embed_dim):
+        """
+        Generate sinusoidal positional encodings as described in Vaswani et al. (2017).
+        Returns a tensor of shape [max_seq_len, embed_dim].
+        """
+        position = torch.arange(max_seq_len, dtype=torch.float).unsqueeze(1)  # [max_seq_len, 1]
+        div_term = torch.exp(
+            torch.arange(0, embed_dim, 2, dtype=torch.float) * (-math.log(10000.0) / embed_dim)
+        )  # [embed_dim // 2]
+        pe = torch.zeros(max_seq_len, embed_dim)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe

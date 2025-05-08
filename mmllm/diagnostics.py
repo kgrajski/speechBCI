@@ -417,3 +417,37 @@ class MMLLM_Diagnostics:
         filename = os.path.join(output_dir, f"adapter_activation_histogram_epoch{epoch}.html")
         fig.write_html(filename)
         print(f"Saved adapter activation histogram to {filename}")
+
+    def position_encoding_heatmap(self, dataloader, output_dir):
+        """
+        Plot a heatmap of the positional encoding matrix from the dataset.
+        The x-axis is the position (sequence index), the y-axis is the embedding dimension.
+        """
+        import plotly.graph_objects as go
+        # Create output directory
+        output_dir = os.path.join(output_dir, "position_encoding_heatmap")
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Get a batch and extract the positional encoding matrix
+        batch = next(iter(dataloader))
+        # Assume positional_encodings is [seq_len, embed_dim] or [batch, seq_len, embed_dim]
+        pos_enc = batch["positional_encodings"]
+        if pos_enc.ndim == 3:
+            # Take the first sample in the batch
+            pos_enc = pos_enc[0]
+        pos_enc_np = pos_enc.detach().cpu().numpy()
+
+        fig = go.Figure(data=go.Heatmap(
+            z=pos_enc_np.T,  # Transpose so x=position, y=embedding dim
+            colorscale="Viridis"
+        ))
+        fig.update_layout(
+            title=f"Positional Encoding Heatmap)",
+            xaxis_title="Position (Sequence Index)",
+            yaxis_title="Embedding Dimension",
+            width=900,
+            height=500
+        )
+        filename = os.path.join(output_dir, f"position_encoding_heatmap_epoch.html")
+        fig.write_html(filename)
+        print(f"Saved positional encoding heatmap to {filename}")
